@@ -1,0 +1,40 @@
+{
+  "name": "hiveton-lvgl-design",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "packages/schema",
+    "packages/lvgl-wasm-runtime"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @hiveton-lvgl/web",
+    "dev:api": "cd apps/api && go run ./cmd/api",
+    "worker:api": "cd apps/api && go run ./cmd/worker",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "cd apps/api && go test ./...",
+    "schema:emit": "npm run schema:emit -w @hiveton-lvgl/schema",
+    "test:schema": "npm run test -w @hiveton-lvgl/schema",
+    "test:runtime": "npm run test -w @hiveton-lvgl/lvgl-wasm-runtime",
+    "test:ui-smoke": "npm run test -w @hiveton-lvgl/web -- EditorShell.test.ts",
+    "test:visual": "playwright test",
+    "test:web": "npm run test -w @hiveton-lvgl/web",
+    "verify": "npm run schema:emit && npm run typecheck && npm run build && npm test && npm run test:api && npm run test:visual && npm run export:example && npm run wasm:check && npm run wasm:smoke",
+    "export:example": "cd apps/api && go run ./cmd/export -input ../../examples/watch-project.json -output ../../.data/example-watch-export.zip",
+    "wasm:check": "npm run wasm:check -w @hiveton-lvgl/lvgl-wasm-runtime",
+    "wasm:build": "npm run wasm:build -w @hiveton-lvgl/lvgl-wasm-runtime",
+    "wasm:smoke": "npm run wasm:smoke -w @hiveton-lvgl/lvgl-wasm-runtime",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.2",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.0.15",
+    "vue-tsc": "^3.1.8"
+  }
+}

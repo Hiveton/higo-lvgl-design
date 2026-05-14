@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "example-watch-project",
+  "name": "Example Watch UI",
+  "target": {
+    "lvglVersion": "8.3",
+    "deviceName": "ESP32-S3",
+    "width": 480,
+    "height": 480,
+    "dpi": 240,
+    "colorDepth": 16
+  },
+  "theme": "dark",
+  "screens": [
+    {
+      "id": "screen-1",
+      "name": "Screen_1",
+      "root": {
+        "id": "root-screen-1",
+        "type": "screen",
+        "name": "Screen_1",
+        "parentId": null,
+        "children": [
+          {
+            "id": "time-label",
+            "type": "label",
+            "name": "Time_Label",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 150, "y": 40, "width": 180, "height": 56 },
+            "props": { "text": "10:09" },
+            "style": {
+              "textColor": "#FFFFFF",
+              "font": "lv_font_montserrat_48",
+              "align": "center"
+            },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "date-label",
+            "type": "label",
+            "name": "Date_Label",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 168, "y": 105, "width": 150, "height": 24 },
+            "props": { "text": "Wed, May 15" },
+            "style": { "textColor": "#C7CDD2" },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "steps-arc",
+            "type": "arc",
+            "name": "Steps_Arc",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 48, "y": 165, "width": 128, "height": 128 },
+            "props": { "min": 0, "max": 100, "value": 72 },
+            "style": { "textColor": "#2F9BFF" },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "steps-metric",
+            "type": "label",
+            "name": "Steps_Metric",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 61, "y": 212, "width": 102, "height": 32 },
+            "props": { "text": "7,842" },
+            "style": { "textColor": "#FFFFFF", "align": "center" },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "battery-bar",
+            "type": "bar",
+            "name": "Battery_Bar",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 245, "y": 208, "width": 156, "height": 18 },
+            "props": { "min": 0, "max": 100, "value": 86 },
+            "style": { "bgColor": "#2FBF71", "radius": 9 },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "start-button",
+            "type": "button",
+            "name": "Start_Button",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 58, "y": 410, "width": 128, "height": 44 },
+            "props": { "text": "Start" },
+            "style": {
+              "bgColor": "#2F9BFF",
+              "textColor": "#FFFFFF",
+              "radius": 22
+            },
+            "locked": false,
+            "hidden": false
+          },
+          {
+            "id": "settings-button",
+            "type": "button",
+            "name": "Settings_Button",
+            "parentId": "root-screen-1",
+            "children": [],
+            "layout": { "x": 294, "y": 410, "width": 128, "height": 44 },
+            "props": { "text": "Settings" },
+            "style": {
+              "bgColor": "#202830",
+              "textColor": "#FFFFFF",
+              "borderColor": "#3A4652",
+              "radius": 22
+            },
+            "locked": false,
+            "hidden": false
+          }
+        ],
+        "layout": { "x": 0, "y": 0, "width": 480, "height": 480 },
+        "props": {},
+        "style": { "bgColor": "#101010" },
+        "locked": false,
+        "hidden": false
+      }
+    }
+  ],
+  "assets": [],
+  "styles": [],
+  "events": [
+    {
+      "id": "event-start-button-LV_EVENT_CLICKED",
+      "widgetId": "start-button",
+      "event": "LV_EVENT_CLICKED",
+      "handlerName": "on_start_clicked"
+    }
+  ],
+  "updatedAt": "2026-05-08T00:00:00Z"
+}
