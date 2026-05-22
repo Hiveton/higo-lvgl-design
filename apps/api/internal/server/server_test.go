@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestHealthEndpointDoesNotRequireAuth(t *testing.T) {
+	app := NewInMemoryServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	res := httptest.NewRecorder()
+	app.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("health status = %d body=%s", res.Code, res.Body.String())
+	}
+	if !bytes.Contains(res.Body.Bytes(), []byte(`"ok":true`)) || !bytes.Contains(res.Body.Bytes(), []byte(`"service":"lvgl-online-editor-api"`)) {
+		t.Fatalf("unexpected health response: %s", res.Body.String())
+	}
+}
+
 func TestProjectCreateGetAndSaveDoc(t *testing.T) {
 	app := NewInMemoryServer()
 	token := loginTestUser(t, app)

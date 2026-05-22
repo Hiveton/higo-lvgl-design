@@ -43,10 +43,15 @@ export const useAuthStore = defineStore("auth", () => {
     error.value = null;
   }
 
+  function clearError(): void {
+    error.value = null;
+  }
+
   return {
     user,
     error,
     restoring,
+    clearError,
     loginDemo,
     loginWithCredentials,
     restoreSession,

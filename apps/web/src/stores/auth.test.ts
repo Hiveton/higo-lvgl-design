@@ -60,4 +60,24 @@ describe("useAuthStore", () => {
     expect(store.user).toBeNull();
     expect(getAuthToken()).toBeNull();
   });
+
+  it("surfaces login API error messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: { code: "INVALID_CREDENTIALS", message: "invalid credentials" }
+          }),
+          { status: 401 }
+        )
+      )
+    );
+    const store = useAuthStore();
+
+    await store.loginWithCredentials("demo@hiveton.dev", "wrong-password");
+
+    expect(store.user).toBeNull();
+    expect(store.error).toBe("invalid credentials");
+  });
 });

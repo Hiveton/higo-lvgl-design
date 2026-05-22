@@ -1,24 +1,57 @@
 <template>
-  <section class="preview-overlay" data-testid="preview-overlay" @click.self="emit('close')">
+  <section
+    ref="overlayRef"
+    class="preview-overlay"
+    data-testid="preview-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Device preview"
+    aria-labelledby="preview-dialog-title"
+    aria-describedby="preview-screen-name preview-target-label preview-status-message"
+    tabindex="-1"
+    @click.self="emit('close')"
+    @keydown.escape.prevent="emit('close')"
+    @keydown.tab="handleTabKeydown"
+  >
     <div class="preview-toolbar">
-      <strong>Preview</strong>
-      <span data-testid="preview-screen-name">{{ activeScreenName }}</span>
-      <span>{{ targetLabel }}</span>
-      <button class="select-like" data-testid="refresh-preview-button" @click="emit('refresh')">Refresh</button>
-      <button class="select-like" data-testid="screenshot-preview-button" @click="emit('screenshot')">Screenshot</button>
+      <strong id="preview-dialog-title">Preview</strong>
+      <span id="preview-screen-name" class="preview-meta-pill" data-testid="preview-screen-name">{{ activeScreenName }}</span>
+      <span id="preview-target-label" class="preview-meta-pill" data-testid="preview-target-label">{{ targetLabel }}</span>
+      <span
+        id="preview-status-message"
+        class="preview-meta-pill preview-status-message"
+        data-testid="preview-status-message"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {{ previewStatusMessage }}
+      </span>
+      <button class="icon-button" type="button" data-testid="refresh-preview-button" :aria-label="refreshPreviewLabel" :title="refreshPreviewLabel" @click="emit('refresh')"><IconGlyph name="refresh" /></button>
+      <button class="icon-button" type="button" data-testid="screenshot-preview-button" :aria-label="captureScreenshotLabel" :title="captureScreenshotLabel" @click="emit('screenshot')"><IconGlyph name="camera" /></button>
       <a
         v-if="previewScreenshotUrl"
-        class="download-link"
+        ref="previewScreenshotLinkRef"
+        class="icon-button"
         data-testid="preview-screenshot-link"
         :href="previewScreenshotUrl"
         download="lvgl-preview.png"
+        :aria-label="downloadScreenshotLabel"
+        :title="downloadScreenshotLabel"
       >
-        Download Screenshot
+        <IconGlyph name="download" />
       </a>
-      <button class="select-like" data-testid="close-preview-button" @click="emit('close')">Close</button>
+      <button class="icon-button" type="button" data-testid="close-preview-button" :aria-label="closePreviewLabel" :title="closePreviewLabel" @click="emit('close')"><IconGlyph name="close" /></button>
     </div>
-    <div class="preview-device" :style="previewDeviceStyle">
-      <button
+    <div
+      class="preview-device"
+      data-testid="preview-device"
+      role="img"
+      :aria-label="previewDeviceLabel"
+      :title="previewDeviceLabel"
+      :style="previewDeviceStyle"
+    >
+      <div
         v-for="item in renderedWidgets"
         :key="item.widget.id"
         class="canvas-widget preview-widget"
@@ -33,7 +66,7 @@
         />
         <span v-else-if="item.widget.type === 'image'" class="widget-content image-placeholder">
           Missing preview
-          <small>{{ widgetText(item.widget) }}</small>
+          <small>{{ imagePlaceholderHint(item.widget) }}</small>
         </span>
         <span v-else-if="item.widget.type === 'label' || item.widget.type === 'button' || item.widget.type === 'container'" class="widget-content">
           {{ widgetText(item.widget) }}
@@ -64,20 +97,23 @@
           <span v-for="(height, index) in chartBarHeights(item.widget)" :key="index" :style="{ height: `${height}%` }" />
         </span>
         <span v-else class="widget-content">{{ widgetText(item.widget) }}</span>
-      </button>
+      </div>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import type { WidgetNode } from "@hiveton-lvgl/schema";
 import type { RenderedWidget } from "./CanvasWorkspace.vue";
+import IconGlyph from "./IconGlyph.vue";
 
-defineProps<{
+const props = defineProps<{
   activeScreenName?: string;
   imagePreviewUrl: (widget: WidgetNode) => string | null;
   previewDeviceStyle: Record<string, string>;
   previewScreenshotUrl: string | null;
+  previewStatusMessage: string;
   renderedWidgets: RenderedWidget[];
   targetLabel: string;
   toTestId: (name: string) => string;
@@ -91,9 +127,66 @@ const emit = defineEmits<{
   screenshot: [];
 }>();
 
+const overlayRef = ref<HTMLElement | null>(null);
+const previewScreenshotLinkRef = ref<HTMLAnchorElement | null>(null);
+const previewName = computed(() => props.activeScreenName ?? "current screen");
+const refreshPreviewLabel = computed(() => `Refresh ${previewName.value} preview`);
+const captureScreenshotLabel = computed(() => `Capture ${previewName.value} preview screenshot`);
+const downloadScreenshotLabel = computed(() => `Download ${previewName.value} preview screenshot`);
+const closePreviewLabel = computed(() => `Close ${previewName.value} preview`);
+const previewDeviceLabel = computed(() => `${previewName.value} preview on ${props.targetLabel}`);
+
+onMounted(() => {
+  void nextTick(() => {
+    overlayRef.value?.focus();
+  });
+});
+
+watch(
+  () => props.previewScreenshotUrl,
+  (url, previousUrl) => {
+    if (!url || url === previousUrl) {
+      return;
+    }
+    void nextTick(() => {
+      previewScreenshotLinkRef.value?.focus();
+    });
+  }
+);
+
+function handleTabKeydown(event: KeyboardEvent): void {
+  const focusableItems = overlayRef.value
+    ? Array.from(
+        overlayRef.value.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true")
+    : [];
+  if (!focusableItems.length) {
+    event.preventDefault();
+    overlayRef.value?.focus();
+    return;
+  }
+  const firstItem = focusableItems[0];
+  const lastItem = focusableItems[focusableItems.length - 1];
+  if (event.shiftKey && document.activeElement === firstItem) {
+    event.preventDefault();
+    lastItem.focus();
+    return;
+  }
+  if (!event.shiftKey && document.activeElement === lastItem) {
+    event.preventDefault();
+    firstItem.focus();
+  }
+}
+
 function propText(widget: WidgetNode, key: string, fallback: string): string {
   const value = widget.props[key];
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function imagePlaceholderHint(widget: WidgetNode): string {
+  return widget.props.assetId ? props.widgetText(widget) : "Select an asset";
 }
 
 function propNumber(widget: WidgetNode, key: string, fallback: number): number {

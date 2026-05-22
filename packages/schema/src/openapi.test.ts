@@ -8,6 +8,7 @@ describe("OpenAPI artifact", () => {
     expect(Object.keys(openapi.paths).sort()).toEqual([
       "/auth/login",
       "/auth/me",
+      "/health",
       "/jobs/{jobId}",
       "/jobs/{jobId}/download",
       "/projects",
@@ -33,12 +34,31 @@ describe("OpenAPI artifact", () => {
     });
   });
 
-  it("marks protected API operations with bearer auth by default and leaves login public", () => {
+  it("marks protected API operations with bearer auth by default and leaves public endpoints open", () => {
     expect(openapi.security).toEqual([{ bearerAuth: [] }]);
     expect(openapi.paths["/auth/login"].post.security).toEqual([]);
+    expect(openapi.paths["/health"].get.security).toEqual([]);
     expect(openapi.components.securitySchemes.bearerAuth).toMatchObject({
       type: "http",
       scheme: "bearer"
+    });
+  });
+
+  it("documents the health response returned by the unauthenticated health route", () => {
+    expect(openapi.paths["/health"].get.responses["200"].content["application/json"].schema).toEqual({
+      $ref: "#/components/schemas/HealthResponse"
+    });
+    expect(openapi.components.schemas.HealthResponse).toEqual({
+      type: "object",
+      required: ["ok", "service"],
+      properties: {
+        ok: {
+          type: "boolean"
+        },
+        service: {
+          type: "string"
+        }
+      }
     });
   });
 

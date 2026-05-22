@@ -53,6 +53,7 @@ npm run schema:emit
 npm run test:ui-smoke
 npm run test:visual
 npm run verify
+npm run verify:native
 npm run typecheck
 npm run build
 npm run export:example
@@ -76,6 +77,12 @@ API 机器可读规格位于 [packages/schema/openapi.json](packages/schema/open
 ```bash
 cd apps/api
 go run ./cmd/api
+```
+
+启动后可用健康检查确认 API 已就绪：
+
+```bash
+curl http://127.0.0.1:8080/api/health
 ```
 
 如果本机 `8080` 已被其他服务占用，使用独立端口启动 API，并让 Vite 代理到该端口：
@@ -150,7 +157,7 @@ VITE_LVGL_WASM_MODULE_URL=/src/runtime/lvgl-editor-runtime.js npm run dev:web
 
 该模块可以导出 `createLvglRuntime()`、`loadRuntime()`、`createLvglWasmBridge()`，也可以是 Emscripten 生成的默认 `createModule()` factory。低级 bridge 至少实现 `mount(canvas)` 或 `init(canvas)`，以及 `renderProject(doc)` 或 `renderProjectJson(json)`。
 
-真实 LVGL WASM native 构建入口位于 [packages/lvgl-wasm-runtime/native](packages/lvgl-wasm-runtime/native)。安装 Emscripten 后执行 `npm run wasm:build`，脚本会拉取 LVGL `v8.3.11`，输出 `packages/lvgl-wasm-runtime/dist/wasm/lvgl-editor-runtime.js` 与 `.wasm`，并同步复制到 `apps/web/src/runtime/` 和 `apps/web/public/runtime/`。Vite dev 使用 `/src/runtime/lvgl-editor-runtime.js`，生产静态部署使用 `/runtime/lvgl-editor-runtime.js`。构建后执行 `npm run wasm:smoke`，会在 Node 中实例化同一份 WASM artifact，验证 `lvgl_editor_init`、`lvgl_editor_render_project_json`、screen/widget 结果回传、嵌套控件父子关系，以及 native RGBA framebuffer 指针、尺寸和像素 alpha。native runtime 第一版会从 `ProjectDoc` 按 widget tree 创建基础 LVGL 控件，包括 label、button、container、arc、bar、line、switch、slider、checkbox、dropdown、spinner、chart，并映射 screen/widget 的 `bgColor`、`textColor`、`borderColor`、`radius`、`opacity` 和 `hidden`。
+真实 LVGL WASM native 构建入口位于 [packages/lvgl-wasm-runtime/native](packages/lvgl-wasm-runtime/native)。`npm run verify` 默认验证 Canvas fallback、代码生成、API 和浏览器 UI，不强制要求本机安装 Emscripten。安装 Emscripten 后执行 `npm run verify:native`，该命令会依次运行 `wasm:check`、`wasm:build` 和 `wasm:smoke`。`wasm:build` 会拉取 LVGL `v8.3.11`，输出 `packages/lvgl-wasm-runtime/dist/wasm/lvgl-editor-runtime.js` 与 `.wasm`，并同步复制到 `apps/web/src/runtime/` 和 `apps/web/public/runtime/`。Vite dev 使用 `/src/runtime/lvgl-editor-runtime.js`，生产静态部署使用 `/runtime/lvgl-editor-runtime.js`。`wasm:smoke` 会在 Node 中实例化同一份 WASM artifact，验证 `lvgl_editor_init`、`lvgl_editor_render_project_json`、screen/widget 结果回传、嵌套控件父子关系，以及 native RGBA framebuffer 指针、尺寸和像素 alpha。native runtime 第一版会从 `ProjectDoc` 按 widget tree 创建基础 LVGL 控件，包括 label、button、container、arc、bar、line、switch、slider、checkbox、dropdown、spinner、chart，并映射 screen/widget 的 `bgColor`、`textColor`、`borderColor`、`radius`、`opacity` 和 `hidden`。
 
 ## 文档索引
 

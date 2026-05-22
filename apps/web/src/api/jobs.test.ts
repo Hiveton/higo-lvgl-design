@@ -7,7 +7,6 @@ afterEach(() => {
 
 describe("jobs api", () => {
   it("loads job status and downloads job result archives with auth headers", async () => {
-    const archive = new Blob(["zip"], { type: "application/zip" });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(
@@ -22,7 +21,7 @@ describe("jobs api", () => {
           { status: 200 }
         )
       )
-      .mockResolvedValueOnce(new Response(archive, { status: 200 }));
+      .mockResolvedValueOnce(new Response("zip", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getJob("job-1")).resolves.toMatchObject({
@@ -31,7 +30,9 @@ describe("jobs api", () => {
         status: "succeeded"
       }
     });
-    await expect(downloadJobResult("/api/jobs/job-1/download")).resolves.toBeInstanceOf(Blob);
+    const result = await downloadJobResult("/api/jobs/job-1/download");
+    expect(result.size).toBe(3);
+    await expect(result.text()).resolves.toBe("zip");
 
     expect(fetchMock).toHaveBeenCalledWith("/api/jobs/job-1", expect.objectContaining({ headers: expect.any(Object) }));
     expect(fetchMock).toHaveBeenCalledWith("/api/jobs/job-1/download", expect.objectContaining({ headers: expect.any(Object) }));

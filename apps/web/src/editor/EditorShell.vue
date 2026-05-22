@@ -1,23 +1,34 @@
 <template>
-  <main class="editor-shell" :class="[`theme-${project.theme}`, `nav-${activeNavItem}`]">
+  <main ref="editorShellRef" class="editor-shell" :class="[`theme-${project.theme}`, `nav-${activeNavItem}`]" :style="bottomDockStyle">
     <TopToolbar
       v-model:grid-enabled="gridEnabled"
       v-model:snap-enabled="snapEnabled"
+      :auth-error="authStore.error"
       :auth-user="authUser"
       :build-status="buildStatus"
-      :can-duplicate-widget="projectStore.canDuplicateSelectedWidget"
+      :can-build-project="canBuildProject"
+      :can-copy-widget="projectStore.canCopySelectedWidget"
+      :can-delete-widget="projectStore.canDeleteSelectedWidget"
+      :can-paste-widget="projectStore.canPasteCopiedWidget"
+      :copied-widget-name="projectStore.copiedWidgetName"
+      :can-redo="projectStore.canRedo"
+      :can-undo="projectStore.canUndo"
       :project="project"
       :projects="projectStore.projects"
+      :selected-widget-name="selectedWidget?.name"
       :simulator-visible="simulatorVisible"
       :target-label="targetLabel"
       @build="buildProject"
+      @clear-auth-error="authStore.clearError"
+      @copy-widget="projectStore.copySelectedWidget"
       @create-project="openNewProjectDialog"
+      @delete-widget="projectStore.deleteSelectedWidget"
       @demo-login="loginDemo"
-      @duplicate-widget="projectStore.duplicateSelectedWidget"
       @load-projects="loadProjectList"
       @login="loginWithPassword"
-      @logout="authStore.logout"
+      @logout="logoutUser"
       @open-project="openProject"
+      @paste-widget="projectStore.pasteCopiedWidget"
       @preview="previewProject"
       @rename-project="projectStore.renameProject"
       @redo="projectStore.redo"
@@ -67,6 +78,7 @@
         :artboard-style="artboardStyle"
         :canvas-pan-style="canvasPanStyle"
         :code-preview="codePreview"
+        :code-copy-status="codeCopyStatus"
         :device-surface-style="deviceSurfaceStyle"
         :grid-enabled="gridEnabled"
         :image-preview-url="imagePreviewUrl"
@@ -83,12 +95,15 @@
         :widget-style="widgetStyle"
         :widget-text="widgetText"
         :zoom-levels="zoomLevels"
+        @add-screen="projectStore.addScreen"
         @artboard-mounted="artboardRef = $event"
+        @copy-generated-code="copyGeneratedCode"
         @drop-widget="dropWidgetOnCanvas"
         @fit-view="fitCanvasToView"
         @fullscreen-canvas="requestCanvasFullscreen"
         @rename-project="projectStore.renameProject"
         @select-widget="projectStore.selectWidget"
+        @show-canvas="activateNav('widgets')"
         @show-settings="activateNav('settings')"
         @start-canvas-pan="startCanvasPan"
         @start-move="startMove"
@@ -140,34 +155,79 @@
       />
     </section>
 
-    <section class="bottom-dock" :class="{ 'simulator-hidden': !simulatorVisible }">
+    <section
+      class="bottom-dock"
+      :class="{ 'simulator-hidden': !simulatorVisible, collapsed: bottomDockCollapsed }"
+      :style="bottomDockStyle"
+      data-testid="bottom-dock"
+    >
+      <button
+        class="bottom-dock-collapse"
+        type="button"
+        data-testid="bottom-dock-collapse-button"
+        :aria-expanded="bottomDockCollapsed ? 'false' : 'true'"
+        :aria-label="bottomDockCollapseLabel"
+        :title="bottomDockCollapseLabel"
+        @click="toggleBottomDockCollapsed"
+      >
+        <IconGlyph :name="bottomDockCollapsed ? 'arrowUp' : 'arrowDown'" />
+      </button>
+      <div
+        class="bottom-dock-resize-handle"
+        data-testid="bottom-dock-resize-handle"
+        role="separator"
+        tabindex="0"
+        aria-orientation="horizontal"
+        aria-label="Resize bottom dock"
+        title="Resize bottom dock"
+        aria-valuemin="180"
+        aria-valuemax="420"
+        :aria-valuenow="bottomDockEffectiveHeight"
+        :aria-valuetext="bottomDockHeightValueText"
+        @mousedown="startBottomDockResize"
+        @keydown="handleBottomDockResizeKeydown"
+      />
       <AssetsPanel
+        data-testid="resources-panel"
+        aria-label="Resources"
+        :class="{ active: activeNavItem === 'resources' }"
         :assets="assetsStore.assets"
         :usage-counts="assetUsageCounts"
         :preview-urls="assetsStore.previewUrls"
+        :selected-widget="selectedWidget"
         :error="assetsStore.error"
         @upload="uploadAsset"
         @delete-asset="deleteAsset"
+        @bind-image-asset="bindAssetFromPanel"
       />
       <LogPanel
         v-model="bottomLogTab"
         :build-status="buildStatus"
         :export-download-url="exportDownloadUrl"
         :log-entries="combinedLogEntries"
+        :project-name="project.name"
         :timeline-items="timelineItems"
         @download-export="downloadExportZip"
       />
       <SimulatorPanel
         v-if="simulatorVisible"
+        :active-screen-name="activeScreen?.name"
+        :background="simulatorBackground"
+        :screenshot-url="simulatorScreenshotUrl"
         :status="simulatorStatus"
         :message="simulatorMessage"
+        @fullscreen="requestSimulatorFullscreen"
         @mounted="handleSimulatorCanvasMounted"
+        @refresh="refreshSimulatorPanel"
+        @screenshot="captureSimulatorScreenshot"
+        @toggle-background="toggleSimulatorBackground"
       />
     </section>
 
     <StatusBar
       :save-state-label="saveStateLabel"
       :persistence-label="persistenceLabel"
+      :activity-message="latestActivityMessage"
       :lvgl-version="project.target.lvglVersion"
       :dpi="project.target.dpi"
       :coordinates="mouseCoordinates"
@@ -179,53 +239,104 @@
       :image-preview-url="imagePreviewUrl"
       :preview-device-style="previewDeviceStyle"
       :preview-screenshot-url="previewScreenshotUrl"
+      :preview-status-message="previewStatusMessage"
       :rendered-widgets="renderedWidgets"
       :target-label="targetLabel"
       :to-test-id="toTestId"
       :widget-style="widgetStyle"
       :widget-text="widgetText"
-      @close="previewOpen = false"
+      @close="closePreview"
       @refresh="refreshPreview"
       @screenshot="capturePreviewScreenshot"
     />
 
-    <section v-if="newProjectDialogOpen" class="confirm-overlay" data-testid="new-project-dialog">
+    <section
+      v-if="newProjectDialogOpen"
+      class="confirm-overlay"
+      data-testid="new-project-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-project-dialog-title"
+      aria-describedby="new-project-dialog-description"
+      @click.self="closeNewProjectDialog"
+      @keydown.tab="handleDialogTabKeydown($event)"
+    >
       <form class="confirm-dialog" @submit.prevent="createNewProject">
-        <strong>Create cloud project</strong>
-        <p>Name the LVGL project before creating it in cloud storage.</p>
+        <strong id="new-project-dialog-title">Create cloud project</strong>
+        <p id="new-project-dialog-description">Name the LVGL project before creating it in cloud storage.</p>
         <label class="dialog-field">
           Project Name
           <input
             v-model="newProjectName"
+            ref="newProjectNameInput"
             data-testid="new-project-name-input"
+            aria-label="Cloud project name"
+            :aria-describedby="newProjectNameError ? 'new-project-name-error' : undefined"
+            :aria-invalid="newProjectNameError ? 'true' : undefined"
+            title="Cloud project name"
             autocomplete="off"
             maxlength="80"
+            @input="clearNewProjectNameError"
           />
         </label>
-        <p v-if="newProjectNameError" class="field-error" data-testid="new-project-name-error">{{ newProjectNameError }}</p>
+        <p v-if="newProjectNameError" id="new-project-name-error" class="field-error" data-testid="new-project-name-error" role="alert">{{ newProjectNameError }}</p>
         <div class="confirm-actions">
-          <button class="select-like" data-testid="cancel-new-project-button" type="button" @click="closeNewProjectDialog">Cancel</button>
-          <button class="primary-action" data-testid="confirm-new-project-button" type="submit">Create project</button>
+          <button class="select-like" data-testid="cancel-new-project-button" type="button" aria-label="Cancel creating cloud project" title="Cancel creating cloud project" @click="closeNewProjectDialog">Cancel</button>
+          <button class="primary-action" data-testid="confirm-new-project-button" type="submit" :aria-label="newProjectConfirmLabel" :title="newProjectConfirmLabel">Create project</button>
         </div>
       </form>
     </section>
 
-    <section v-if="pendingAssetDelete" class="confirm-overlay" data-testid="asset-delete-confirm">
+    <section
+      v-if="pendingAssetDelete"
+      class="confirm-overlay"
+      data-testid="asset-delete-confirm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="asset-delete-confirm-title"
+      aria-describedby="asset-delete-confirm-description"
+      @click.self="cancelAssetDelete"
+      @keydown.tab="handleDialogTabKeydown($event)"
+    >
       <div class="confirm-dialog">
-        <strong>Delete referenced asset?</strong>
-        <p>{{ pendingAssetDelete.name }} is used by {{ pendingAssetDelete.usageCount }} image widget{{ pendingAssetDelete.usageCount === 1 ? "" : "s" }}. Deleting it will clear those image references.</p>
+        <strong id="asset-delete-confirm-title">Delete referenced asset?</strong>
+        <p id="asset-delete-confirm-description" role="alert">{{ pendingAssetDelete.name }} is used by {{ pendingAssetDelete.usageCount }} image widget{{ pendingAssetDelete.usageCount === 1 ? "" : "s" }}. Deleting it will clear those image references.</p>
         <div class="confirm-actions">
-          <button class="select-like" data-testid="cancel-delete-asset-button" @click="cancelAssetDelete">Cancel</button>
-          <button class="danger-action" data-testid="confirm-delete-asset-button" @click="confirmAssetDelete">Delete asset</button>
+          <button
+            ref="assetDeleteCancelButton"
+            class="select-like"
+            type="button"
+            data-testid="cancel-delete-asset-button"
+            :aria-label="assetDeleteCancelLabel"
+            :title="assetDeleteCancelLabel"
+            @click="cancelAssetDelete"
+          >
+            Cancel
+          </button>
+          <button
+            class="danger-action"
+            type="button"
+            data-testid="confirm-delete-asset-button"
+            :aria-label="assetDeleteConfirmLabel"
+            :title="assetDeleteConfirmLabel"
+            @click="confirmAssetDelete"
+          >
+            Delete asset
+          </button>
         </div>
       </div>
     </section>
   </main>
 </template>
 
+<script lang="ts">
+let nextEditorShellToken = 0;
+let activeEditorShellToken = 0;
+</script>
+
 <script setup lang="ts">
 import { widgetCatalog, type EventBinding, type ProjectDoc, type WidgetNode } from "@hiveton-lvgl/schema";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { loadRuntime, SimulatorRuntimeError, type LvglRuntime } from "@hiveton-lvgl/lvgl-wasm-runtime";
 import { getAuthToken } from "../api/auth";
 import { downloadJobResult } from "../api/jobs";
@@ -237,6 +348,7 @@ import { useSimulatorStore } from "../stores/simulator";
 import AssetsPanel from "./AssetsPanel.vue";
 import CanvasWorkspace, { type RenderedWidget } from "./CanvasWorkspace.vue";
 import InspectorPanel, { type InspectorTab } from "./InspectorPanel.vue";
+import IconGlyph from "./IconGlyph.vue";
 import LayersPanel, { type LayerRow } from "./LayersPanel.vue";
 import LogPanel from "./LogPanel.vue";
 import PreviewOverlay from "./PreviewOverlay.vue";
@@ -252,10 +364,12 @@ const assetsStore = useAssetsStore();
 const authStore = useAuthStore();
 const jobsStore = useJobsStore();
 const simulatorStore = useSimulatorStore();
+const editorShellToken = ++nextEditorShellToken;
 const project = computed(() => projectStore.project);
 const activeScreen = computed(() => projectStore.activeScreen);
 const selectedWidget = computed(() => projectStore.selectedWidget);
 const authUser = computed(() => authStore.user);
+const canBuildProject = computed(() => Boolean(authUser.value || getAuthToken()));
 const layerRows = computed<LayerRow[]>(() => flattenLayerRows(activeScreen.value?.root.children ?? []));
 const eventTargetRows = computed<LayerRow[]>(() =>
   activeScreen.value
@@ -335,10 +449,31 @@ const timelineItems = computed(() => [
   }))
 ]);
 const combinedLogEntries = computed(() => [...logEntries.value, ...jobsStore.logEntries]);
+const latestActivityMessage = computed(() => {
+  const visibleEntries = combinedLogEntries.value.filter((entry) =>
+    entry.id !== "log-preview-updated" &&
+    entry.id !== "log-simulator-render" &&
+    entry.id !== "log-simulator-loaded"
+  );
+  if (!authUser.value) {
+    const signedOutIndex = lastEntryIndex(visibleEntries, "log-auth-signed-out");
+    const signedInIndex = lastEntryIndex(visibleEntries, "log-auth-login");
+    if (signedOutIndex > signedInIndex) {
+      const afterSignOut = visibleEntries.slice(signedOutIndex + 1);
+      const hasNewUserFacingActivity = afterSignOut.some((entry) => entry.id !== "log-project-saved");
+      if (!hasNewUserFacingActivity) {
+        return visibleEntries[signedOutIndex]?.message ?? "Signed out; local editing remains";
+      }
+    }
+  }
+  const latest = [...visibleEntries].reverse().at(0);
+  return latest?.message ?? "Editor ready";
+});
 const eventType = ref<EventBinding["event"]>("LV_EVENT_CLICKED");
 const eventHandler = ref("on_time_clicked");
 const eventTargetWidgetId = ref("time-label");
 const simulatorCanvas = ref<HTMLCanvasElement | null>(null);
+const editorShellRef = ref<HTMLElement | null>(null);
 const artboardRef = ref<HTMLElement | null>(null);
 const simulatorRuntime = ref<LvglRuntime | null>(null);
 const autosaveTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -346,7 +481,11 @@ const simulatorRenderTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const activeCenterPanel = ref<"canvas" | "code" | "settings">("canvas");
 const activeNavItem = ref<SidebarNavItem>("widgets");
 const activeInspectorTab = ref<InspectorTab>("style");
+const codeCopyStatus = ref("Ready to copy");
 const bottomLogTab = ref<"log" | "timeline">("log");
+const bottomDockCollapsed = ref(false);
+const bottomDockHeight = ref(248);
+const bottomDockUserSized = ref(false);
 const draggedLayerWidgetId = ref<string | null>(null);
 const inspectorErrors = ref<Record<string, string>>({});
 const exportDownloadUrl = computed(() => jobsStore.exportDownloadUrl);
@@ -354,12 +493,30 @@ const buildStatus = computed(() => jobsStore.buildStatus);
 const simulatorStatus = computed(() => simulatorStore.status);
 const simulatorMessage = computed(() => simulatorStore.message);
 const simulatorVisible = ref(true);
+const simulatorBackground = ref<"dark" | "light">("dark");
+const simulatorScreenshotUrl = ref<string | null>(null);
 const previewOpen = ref(false);
+const previewReturnFocusElement = ref<HTMLElement | null>(null);
 const previewScreenshotUrl = ref<string | null>(null);
+const previewStatusMessage = ref("Live preview ready");
 const pendingAssetDelete = ref<null | { assetId: string; name: string; usageCount: number }>(null);
+const assetDeleteCancelLabel = computed(() =>
+  pendingAssetDelete.value ? `Cancel deleting ${pendingAssetDelete.value.name} asset` : "Cancel deleting asset"
+);
+const assetDeleteConfirmLabel = computed(() =>
+  pendingAssetDelete.value ? `Delete ${pendingAssetDelete.value.name} asset` : "Delete asset"
+);
 const newProjectDialogOpen = ref(false);
+const newProjectReturnFocusElement = ref<HTMLElement | null>(null);
+const assetDeleteReturnFocusElement = ref<HTMLElement | null>(null);
 const newProjectName = ref("Untitled LVGL UI");
 const newProjectNameError = ref<string | null>(null);
+const newProjectNameInput = ref<HTMLInputElement | null>(null);
+const newProjectConfirmLabel = computed(() => {
+  const name = newProjectName.value.trim();
+  return name ? `Create ${name} cloud project` : "Create cloud project";
+});
+const assetDeleteCancelButton = ref<HTMLButtonElement | null>(null);
 const simulatorWasmModuleUrl = import.meta.env.VITE_LVGL_WASM_MODULE_URL?.trim() || undefined;
 const zoomLevels = [25, 50, 75, 100, 150, 200];
 const zoomPercent = ref(100);
@@ -369,6 +526,16 @@ const spacePanActive = ref(false);
 const canvasPan = ref({ x: 0, y: 0 });
 const alignmentGuides = ref<{ vertical: number[]; horizontal: number[] }>({ vertical: [], horizontal: [] });
 const mouseCoordinates = ref({ x: 0, y: 0 });
+const bottomDockEffectiveHeight = computed(() =>
+  activeNavItem.value === "resources" && !bottomDockUserSized.value ? 376 : bottomDockHeight.value
+);
+const bottomDockStyle = computed(() => ({
+  "--bottom-dock-height": bottomDockCollapsed.value ? "36px" : `${bottomDockEffectiveHeight.value}px`
+}));
+const bottomDockCollapseLabel = computed(() =>
+  bottomDockCollapsed.value ? "Expand console simulator and build dock" : "Collapse console simulator and build dock"
+);
+const bottomDockHeightValueText = computed(() => `Bottom dock height ${bottomDockEffectiveHeight.value} pixels`);
 const interaction = ref<null | {
   mode: "move" | "resize" | "pan";
   widgetId: string;
@@ -377,6 +544,10 @@ const interaction = ref<null | {
   startX: number;
   startY: number;
   startWidth: number;
+  startHeight: number;
+}>(null);
+const bottomDockResize = ref<null | {
+  startY: number;
   startHeight: number;
 }>(null);
 
@@ -409,21 +580,31 @@ const previewDeviceStyle = computed(() => ({
 
 const codePreview = computed(() => generateCodePreview());
 
+watch(codePreview, () => {
+  codeCopyStatus.value = "Ready to copy";
+});
+
 const logEntries = ref([
   { id: "log-editor-ready", time: "10:21:05", message: "Editor ready" }
 ]);
 
 onMounted(() => {
+  activeEditorShellToken = editorShellToken;
   document.addEventListener("keydown", handleKeydown, { capture: true });
   document.addEventListener("keyup", handleKeyup, { capture: true });
   void mountSimulator();
 });
 
 onBeforeUnmount(() => {
+  if (activeEditorShellToken === editorShellToken) {
+    activeEditorShellToken = 0;
+  }
   document.removeEventListener("keydown", handleKeydown, { capture: true });
   document.removeEventListener("keyup", handleKeyup, { capture: true });
   document.removeEventListener("mousemove", handleCanvasMouseMove);
   document.removeEventListener("mouseup", endCanvasInteraction);
+  document.removeEventListener("mousemove", handleBottomDockResize);
+  document.removeEventListener("mouseup", endBottomDockResize);
   if (autosaveTimer.value) {
     clearTimeout(autosaveTimer.value);
   }
@@ -460,9 +641,14 @@ watch(
 );
 
 function previewProject(): void {
+  previewReturnFocusElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   previewOpen.value = true;
+  void nextTick(() => {
+    (document.querySelector('[data-testid="preview-overlay"]') as HTMLElement | null)?.focus();
+  });
   void renderSimulator();
   previewScreenshotUrl.value = null;
+  previewStatusMessage.value = "Live preview ready";
   logEntries.value.push({
     id: `log-preview-${logEntries.value.length}`,
     time: "10:21:10",
@@ -470,8 +656,17 @@ function previewProject(): void {
   });
 }
 
+function closePreview(): void {
+  previewOpen.value = false;
+  void nextTick(() => {
+    previewReturnFocusElement.value?.focus();
+    previewReturnFocusElement.value = null;
+  });
+}
+
 function refreshPreview(): void {
   previewScreenshotUrl.value = null;
+  previewStatusMessage.value = "Preview refreshed";
   void renderSimulator();
   appendLog("Preview updated", "10:21:10");
 }
@@ -479,11 +674,48 @@ function refreshPreview(): void {
 function capturePreviewScreenshot(): void {
   const canvas = simulatorCanvas.value;
   if (!canvas || typeof canvas.toDataURL !== "function") {
+    previewStatusMessage.value = "Screenshot unavailable";
     appendLog("Preview screenshot unavailable", "10:21:10");
     return;
   }
   previewScreenshotUrl.value = canvas.toDataURL("image/png");
+  previewStatusMessage.value = "Screenshot ready";
   appendLog("Preview screenshot ready", "10:21:10");
+}
+
+function refreshSimulatorPanel(): void {
+  simulatorScreenshotUrl.value = null;
+  void renderSimulator();
+  appendLog("Simulator refreshed", "10:21:10");
+}
+
+function captureSimulatorScreenshot(): void {
+  const canvas = simulatorCanvas.value;
+  if (!canvas || typeof canvas.toDataURL !== "function") {
+    appendLog("Simulator screenshot unavailable", "10:21:10");
+    return;
+  }
+  simulatorScreenshotUrl.value = canvas.toDataURL("image/png");
+  appendLog("Simulator screenshot ready", "10:21:10");
+}
+
+function toggleSimulatorBackground(): void {
+  simulatorBackground.value = simulatorBackground.value === "dark" ? "light" : "dark";
+  appendLog(`Simulator background ${simulatorBackground.value}`, "10:21:10");
+}
+
+async function requestSimulatorFullscreen(): Promise<void> {
+  const canvas = simulatorCanvas.value as (HTMLCanvasElement & { requestFullscreen?: () => Promise<void> }) | null;
+  if (!canvas?.requestFullscreen) {
+    appendLog("Simulator fullscreen unavailable", "10:21:10");
+    return;
+  }
+  try {
+    await canvas.requestFullscreen();
+    appendLog("Simulator fullscreen opened", "10:21:10");
+  } catch (error) {
+    appendLog(error instanceof Error ? `Simulator fullscreen failed: ${error.message}` : "Simulator fullscreen failed", "10:21:10");
+  }
 }
 
 function handleSimulatorCanvasMounted(canvas: HTMLCanvasElement): void {
@@ -498,6 +730,65 @@ function toggleSimulatorPanel(): void {
     simulatorRuntime.value = null;
     simulatorCanvas.value = null;
     simulatorStore.markLoading("Simulator hidden");
+  }
+}
+
+function toggleBottomDockCollapsed(): void {
+  bottomDockCollapsed.value = !bottomDockCollapsed.value;
+}
+
+function startBottomDockResize(event: MouseEvent): void {
+  event.preventDefault();
+  bottomDockCollapsed.value = false;
+  bottomDockResize.value = {
+    startY: event.clientY,
+    startHeight: bottomDockEffectiveHeight.value
+  };
+  document.addEventListener("mousemove", handleBottomDockResize);
+  document.addEventListener("mouseup", endBottomDockResize);
+}
+
+function setBottomDockHeight(height: number): void {
+  bottomDockCollapsed.value = false;
+  bottomDockHeight.value = Math.min(420, Math.max(180, Math.round(height)));
+  bottomDockUserSized.value = true;
+}
+
+function handleBottomDockResize(event: MouseEvent): void {
+  const session = bottomDockResize.value;
+  if (!session) {
+    return;
+  }
+  const nextHeight = session.startHeight + session.startY - event.clientY;
+  setBottomDockHeight(nextHeight);
+}
+
+function endBottomDockResize(): void {
+  bottomDockResize.value = null;
+  document.removeEventListener("mousemove", handleBottomDockResize);
+  document.removeEventListener("mouseup", endBottomDockResize);
+}
+
+function handleBottomDockResizeKeydown(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 40 : 16;
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    setBottomDockHeight(bottomDockEffectiveHeight.value + step);
+    return;
+  }
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    setBottomDockHeight(bottomDockEffectiveHeight.value - step);
+    return;
+  }
+  if (event.key === "Home") {
+    event.preventDefault();
+    setBottomDockHeight(180);
+    return;
+  }
+  if (event.key === "End") {
+    event.preventDefault();
+    setBottomDockHeight(420);
   }
 }
 
@@ -529,18 +820,73 @@ async function requestCanvasFullscreen(): Promise<void> {
   }
   try {
     await stage.requestFullscreen();
+    appendLog("Canvas fullscreen opened", "10:21:10");
   } catch (error) {
     appendLog(error instanceof Error ? `Canvas fullscreen failed: ${error.message}` : "Canvas fullscreen failed", "10:21:10");
   }
 }
 
+async function copyGeneratedCode(): Promise<void> {
+  const code = codePreview.value;
+  if (!code.trim()) {
+    codeCopyStatus.value = "No code to copy";
+    return;
+  }
+  codeCopyStatus.value = "Copying...";
+  try {
+    await writeClipboardText(code);
+    codeCopyStatus.value = "Code copied";
+    appendLog("Generated code copied to clipboard", "10:21:10");
+  } catch (error) {
+    codeCopyStatus.value = "Copy failed";
+    appendLog(error instanceof Error ? `Copy code failed: ${error.message}` : "Copy code failed", "10:21:10");
+  }
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await Promise.race([
+      navigator.clipboard.writeText(text),
+      new Promise((_, reject) => {
+        window.setTimeout(() => reject(new Error("clipboard write timed out")), 1200);
+      })
+    ]);
+    return;
+  }
+  if (copyTextWithSelection(text)) {
+    return;
+  }
+  throw new Error("clipboard API unavailable");
+}
+
+function copyTextWithSelection(text: string): boolean {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textArea.remove();
+  }
+}
+
 async function loginWithPassword(email: string, password: string): Promise<void> {
   await authStore.loginWithCredentials(email, password);
+  if (authStore.user) {
+    assetsStore.clearError();
+  }
   logLoginResult();
 }
 
 async function loginDemo(): Promise<void> {
   await authStore.loginDemo();
+  if (authStore.user) {
+    assetsStore.clearError();
+  }
   logLoginResult();
 }
 
@@ -600,6 +946,9 @@ function scheduleAutosave(): void {
     clearTimeout(autosaveTimer.value);
   }
   autosaveTimer.value = setTimeout(() => {
+    if (activeEditorShellToken !== editorShellToken) {
+      return;
+    }
     void saveProjectWithLog();
   }, 800);
 }
@@ -609,6 +958,9 @@ function scheduleSimulatorRender(): void {
     clearTimeout(simulatorRenderTimer.value);
   }
   simulatorRenderTimer.value = setTimeout(() => {
+    if (activeEditorShellToken !== editorShellToken) {
+      return;
+    }
     void renderSimulator();
   }, 500);
 }
@@ -618,14 +970,28 @@ function openNewProjectDialog(): void {
     upsertLog("project-create-cloud-required", "10:21:11", "Sign in before creating cloud projects");
     return;
   }
+  newProjectReturnFocusElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   newProjectName.value = "Untitled LVGL UI";
   newProjectNameError.value = null;
   newProjectDialogOpen.value = true;
+  void nextTick(() => {
+    newProjectNameInput.value?.focus();
+  });
 }
 
 function closeNewProjectDialog(): void {
   newProjectDialogOpen.value = false;
   newProjectNameError.value = null;
+  void nextTick(() => {
+    newProjectReturnFocusElement.value?.focus();
+    newProjectReturnFocusElement.value = null;
+  });
+}
+
+function clearNewProjectNameError(): void {
+  if (newProjectNameError.value && newProjectName.value.trim()) {
+    newProjectNameError.value = null;
+  }
 }
 
 async function createNewProject(): Promise<void> {
@@ -755,6 +1121,21 @@ async function saveProjectWithLog(): Promise<boolean> {
   }
   upsertLog("project-save-failed", "10:21:11", `Project save failed: ${projectStore.saveError ?? "unknown error"}`);
   return false;
+}
+
+function logoutUser(): void {
+  authStore.logout();
+  assetsStore.clearError();
+  upsertLog("auth-signed-out", "10:21:12", "Signed out; local editing remains");
+}
+
+function lastEntryIndex(entries: Array<{ id: string }>, id: string): number {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.id === id) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function widgetText(widget: WidgetNode): string {
@@ -1710,7 +2091,19 @@ async function uploadAsset(file: File): Promise<void> {
   const asset = await assetsStore.uploadAsset(project.value.id, file);
   if (asset) {
     projectStore.registerAsset(asset);
+    appendLog(`Asset uploaded: ${asset.name}`, "10:21:11");
   }
+}
+
+function bindAssetFromPanel(assetId: string): void {
+  const widget = selectedWidget.value;
+  if (!widget || widget.type !== "image" || widget.locked) {
+    appendLog("Select an unlocked image widget before binding an asset", "10:21:11");
+    return;
+  }
+  projectStore.bindSelectedImageAsset(assetId);
+  activeInspectorTab.value = "style";
+  appendLog("Image asset bound from Assets panel", "10:21:11");
 }
 
 function isLocalOnlyProject(): boolean {
@@ -1719,12 +2112,16 @@ function isLocalOnlyProject(): boolean {
 
 async function deleteAsset(assetId: string): Promise<void> {
   if (isAssetReferenced(assetId)) {
+    assetDeleteReturnFocusElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const asset = project.value.assets.find((item) => item.id === assetId);
     pendingAssetDelete.value = {
       assetId,
       name: asset?.name ?? assetId,
       usageCount: assetUsageCounts.value[assetId] ?? 1
     };
+    void nextTick(() => {
+      assetDeleteCancelButton.value?.focus();
+    });
     return;
   }
   await deleteAssetNow(assetId);
@@ -1733,6 +2130,7 @@ async function deleteAsset(assetId: string): Promise<void> {
 async function confirmAssetDelete(): Promise<void> {
   const assetId = pendingAssetDelete.value?.assetId;
   pendingAssetDelete.value = null;
+  assetDeleteReturnFocusElement.value = null;
   if (assetId) {
     await deleteReferencedAssetNow(assetId);
   }
@@ -1740,16 +2138,24 @@ async function confirmAssetDelete(): Promise<void> {
 
 function cancelAssetDelete(): void {
   pendingAssetDelete.value = null;
+  void nextTick(() => {
+    assetDeleteReturnFocusElement.value?.focus();
+    assetDeleteReturnFocusElement.value = null;
+  });
 }
 
 async function deleteAssetNow(assetId: string): Promise<void> {
+  const assetName = project.value.assets.find((asset) => asset.id === assetId)?.name ?? assetId;
   const deleted = await assetsStore.deleteAsset(project.value.id, assetId);
   if (deleted) {
     projectStore.unregisterAsset(assetId);
+    appendLog(`Asset deleted: ${assetName}`, "10:21:11");
+    focusAssetToolbarAfterDelete();
   }
 }
 
 async function deleteReferencedAssetNow(assetId: string): Promise<void> {
+  const assetName = project.value.assets.find((asset) => asset.id === assetId)?.name ?? assetId;
   projectStore.unregisterAsset(assetId);
   const saved = await saveProjectWithLog();
   if (!saved) {
@@ -1760,7 +2166,16 @@ async function deleteReferencedAssetNow(assetId: string): Promise<void> {
   if (!deleted) {
     projectStore.undo();
     await saveProjectWithLog();
+    return;
   }
+  appendLog(`Asset deleted: ${assetName}`, "10:21:11");
+  focusAssetToolbarAfterDelete();
+}
+
+function focusAssetToolbarAfterDelete(): void {
+  void nextTick(() => {
+    (editorShellRef.value?.querySelector('[data-testid="asset-list-view-button"]') as HTMLElement | null)?.focus();
+  });
 }
 
 function isAssetReferenced(assetId: string): boolean {
@@ -1804,8 +2219,34 @@ function dropLayerWidget(targetWidgetId: string): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (activeEditorShellToken !== editorShellToken || event.defaultPrevented) {
+    return;
+  }
+  if (event.key === "Escape" && previewOpen.value) {
+    event.preventDefault();
+    closePreview();
+    return;
+  }
+  if (event.key === "Escape" && newProjectDialogOpen.value) {
+    event.preventDefault();
+    closeNewProjectDialog();
+    return;
+  }
+  if (event.key === "Escape" && pendingAssetDelete.value) {
+    event.preventDefault();
+    cancelAssetDelete();
+    return;
+  }
+  if (editorModalOpen.value && isCommandEditorShortcut(event)) {
+    event.preventDefault();
+    return;
+  }
   const target = event.target as HTMLElement | null;
   if (target?.tagName === "INPUT" || target?.tagName === "SELECT" || target?.tagName === "TEXTAREA") {
+    return;
+  }
+  if (editorModalOpen.value && isGlobalEditorShortcut(event)) {
+    event.preventDefault();
     return;
   }
   if (event.key === " " || event.code === "Space") {
@@ -1816,6 +2257,21 @@ function handleKeydown(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
     event.preventDefault();
     projectStore.copySelectedWidget();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    void saveProjectWithLog();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+    event.preventDefault();
+    void loadProjectList();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+    event.preventDefault();
+    openNewProjectDialog();
     return;
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") {
@@ -1852,10 +2308,59 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== "Delete" && event.key !== "Backspace") {
     return;
   }
+  event.preventDefault();
   projectStore.deleteSelectedWidget();
 }
 
+const editorModalOpen = computed(() => previewOpen.value || newProjectDialogOpen.value || Boolean(pendingAssetDelete.value));
+
+function isGlobalEditorShortcut(event: KeyboardEvent): boolean {
+  return isCommandEditorShortcut(event) || isKeyboardEditorShortcut(event);
+}
+
+function isCommandEditorShortcut(event: KeyboardEvent): boolean {
+  if (event.metaKey || event.ctrlKey) {
+    return ["c", "d", "n", "o", "s", "v", "z"].includes(event.key.toLowerCase());
+  }
+  return false;
+}
+
+function isKeyboardEditorShortcut(event: KeyboardEvent): boolean {
+  return [" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Backspace", "Delete"].includes(event.key)
+    || event.code === "Space";
+}
+
+function handleDialogTabKeydown(event: KeyboardEvent): void {
+  const dialog = event.currentTarget as HTMLElement | null;
+  const focusableItems = dialog
+    ? Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true")
+    : [];
+  if (!focusableItems.length) {
+    event.preventDefault();
+    dialog?.focus();
+    return;
+  }
+  const firstItem = focusableItems[0];
+  const lastItem = focusableItems[focusableItems.length - 1];
+  if (event.shiftKey && document.activeElement === firstItem) {
+    event.preventDefault();
+    lastItem.focus();
+    return;
+  }
+  if (!event.shiftKey && document.activeElement === lastItem) {
+    event.preventDefault();
+    firstItem.focus();
+  }
+}
+
 function handleKeyup(event: KeyboardEvent): void {
+  if (activeEditorShellToken !== editorShellToken || event.defaultPrevented) {
+    return;
+  }
   if (event.key === " " || event.code === "Space") {
     spacePanActive.value = false;
   }

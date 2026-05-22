@@ -1,8 +1,12 @@
 <template>
   <button
     class="canvas-widget"
+    type="button"
     :class="{ selected: selected }"
     :data-testid="`canvas-widget-${toTestId(item.widget.name)}`"
+    :aria-label="canvasWidgetActionLabel"
+    :aria-pressed="selected ? 'true' : 'false'"
+    :title="canvasWidgetActionLabel"
     :style="widgetStyle(item)"
     @click="emit('select-widget', item.widget.id)"
     @mousedown="emit('start-move', item.widget, $event)"
@@ -18,7 +22,7 @@
     />
     <span v-else-if="item.widget.type === 'image'" class="widget-content image-placeholder">
       Missing preview
-      <small>{{ widgetText(item.widget) }}</small>
+      <small>{{ imagePlaceholderHint }}</small>
     </span>
     <span v-else-if="item.widget.type === 'label' || item.widget.type === 'button' || item.widget.type === 'container'" class="widget-content">
       {{ widgetText(item.widget) }}
@@ -53,6 +57,7 @@
       v-if="selected"
       class="resize-handle"
       :data-testid="`resize-handle-${toTestId(item.widget.name)}`"
+      :title="resizeHandleTitle"
       @mousedown.stop="emit('start-resize', item.widget, $event)"
     />
   </button>
@@ -79,7 +84,14 @@ const emit = defineEmits<{
 }>();
 
 const selected = computed(() => props.selectedWidgetId === props.item.widget.id);
+const canvasWidgetActionLabel = computed(() =>
+  `Select and drag ${props.item.widget.name} ${props.item.widget.type} widget`
+);
+const resizeHandleTitle = computed(() => `Resize ${props.item.widget.name} widget`);
 const previewUrl = computed(() => props.imagePreviewUrl(props.item.widget));
+const imagePlaceholderHint = computed(() =>
+  props.item.widget.props.assetId ? props.widgetText(props.item.widget) : "Select an asset"
+);
 const isChecked = computed(() => props.item.widget.props.checked === true);
 const valuePercent = computed(() => {
   const min = propNumber("min", 0);

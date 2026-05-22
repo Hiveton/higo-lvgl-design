@@ -190,10 +190,13 @@ npm run build
 cd apps/api && go test ./...
 npm run schema:emit
 npm run export:example
+npm run verify:native
 npm run wasm:check
 npm run wasm:build
 npm run wasm:smoke
 ```
+
+`npm run verify` 是默认本地验收链路，不要求安装 Emscripten。真实 LVGL native WASM runtime 使用 `npm run verify:native` 单独验收，该命令会先检查工具链，再构建 artifact，最后执行 native smoke。
 
 文档阶段验收使用：
 

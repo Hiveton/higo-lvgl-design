@@ -126,6 +126,7 @@ func NewInMemoryServer() http.Handler {
 
 func (server *Server) routes() {
 	server.router.Route("/api", func(router chi.Router) {
+		router.Get("/health", health)
 		router.Post("/auth/login", server.login)
 		router.Get("/auth/me", server.me)
 		router.Group(func(protected chi.Router) {

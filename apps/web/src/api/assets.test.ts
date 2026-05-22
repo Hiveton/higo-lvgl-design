@@ -7,7 +7,6 @@ afterEach(() => {
 
 describe("assets api", () => {
   it("lists assets and downloads protected asset content", async () => {
-    const blob = new Blob(["png"], { type: "image/png" });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         assets: [{
@@ -23,11 +22,14 @@ describe("assets api", () => {
           createdAt: "2026-05-08T00:00:00Z"
         }]
       }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(blob, { status: 200, headers: { "Content-Type": "image/png" } }));
+      .mockResolvedValueOnce(new Response("png", { status: 200, headers: { "Content-Type": "image/png" } }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(listProjectAssets("project-1")).resolves.toHaveLength(1);
-    await expect(getProjectAssetContent("project-1", "asset-1")).resolves.toBeInstanceOf(Blob);
+    const content = await getProjectAssetContent("project-1", "asset-1");
+    expect(content.size).toBe(3);
+    expect(content.type).toBe("image/png");
+    await expect(content.text()).resolves.toBe("png");
 
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/assets", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/assets/asset-1/content", expect.any(Object));

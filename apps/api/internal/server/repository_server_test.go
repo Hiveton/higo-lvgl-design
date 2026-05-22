@@ -18,6 +18,21 @@ import (
 	"github.com/hiveton/lvgl-online-editor/apps/api/internal/storage"
 )
 
+func TestRepositoryServerHealthEndpointDoesNotRequireAuth(t *testing.T) {
+	handler := NewRepositoryServer(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo())
+
+	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"ok":true`)) || !bytes.Contains(response.Body.Bytes(), []byte(`"service":"lvgl-online-editor-api"`)) {
+		t.Fatalf("unexpected health response: %s", response.Body.String())
+	}
+}
+
 func TestRepositoryServerCreatesAndSavesProject(t *testing.T) {
 	handler := NewRepositoryServer(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo())
 	token := loginToken(t, handler, "demo@hiveton.dev")

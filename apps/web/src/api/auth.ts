@@ -9,6 +9,13 @@ export type LoginResponse = {
   user: AuthUser;
 };
 
+type ErrorPayload = {
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
+
 const tokenKey = "lvgl-editor-token";
 let memoryToken: string | null = null;
 
@@ -21,7 +28,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
     body: JSON.stringify({ email, password })
   });
   if (!response.ok) {
-    throw new Error(`login failed with status ${response.status}`);
+    throw new Error(await responseErrorMessage(response, `login failed with status ${response.status}`));
   }
   const payload = (await response.json()) as LoginResponse;
   setAuthToken(payload.token);
@@ -95,4 +102,13 @@ export function authHeaders(extra: Record<string, string> = {}): Record<string, 
     ...extra,
     Authorization: `Bearer ${token}`
   };
+}
+
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.clone().json()) as ErrorPayload;
+    return payload.error?.message || fallback;
+  } catch {
+    return fallback;
+  }
 }

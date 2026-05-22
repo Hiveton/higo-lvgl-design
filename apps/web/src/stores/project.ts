@@ -87,8 +87,14 @@ export const useProjectStore = defineStore("project", () => {
   const project = computed(() => currentDoc.value);
   const activeScreen = computed(() => getActiveScreen(project.value, activeScreenId.value));
   const selectedWidget = computed(() => findWidgetById(project.value, selectedWidgetId.value));
+  const canCopySelectedWidget = computed(() => canCopyWidget(selectedWidget.value));
+  const canPasteCopiedWidget = computed(() => canPasteWidget());
+  const copiedWidgetName = computed(() => copiedWidget.value?.widget.name);
+  const canDeleteSelectedWidget = computed(() => canDeleteWidget(selectedWidget.value));
   const canDuplicateSelectedWidget = computed(() => canDuplicateWidget(selectedWidget.value));
   const historyEntries = computed(() => historyStore.entries);
+  const canUndo = computed(() => historyStore.entries.some((entry) => entry.status === "done"));
+  const canRedo = computed(() => historyStore.entries.some((entry) => entry.status === "undone"));
 
   function execute(command: EditorCommand): void {
     historyStore.execute(command);
@@ -139,7 +145,7 @@ export const useProjectStore = defineStore("project", () => {
 
   function copySelectedWidget(): void {
     const widget = selectedWidget.value;
-    if (!widget || widget.type === "screen") {
+    if (!widget || !canCopyWidget(widget)) {
       return;
     }
     const copiedWidgetIds = collectWidgetIds(widget);
@@ -180,6 +186,28 @@ export const useProjectStore = defineStore("project", () => {
     const parentId = source.parentId ?? screen.root.id;
     const parent = findWidgetById(project.value, parentId);
     return parent?.locked !== true;
+  }
+
+  function canCopyWidget(source: WidgetNode | null | undefined): boolean {
+    return Boolean(source && source.type !== "screen" && !source.locked);
+  }
+
+  function canPasteWidget(): boolean {
+    const clipboard = copiedWidget.value;
+    const screen = activeScreen.value;
+    if (!clipboard || !screen) {
+      return false;
+    }
+    const selected = selectedWidget.value;
+    const parentId = selected?.type === "container" && !selected.locked
+      ? selected.id
+      : clipboard.widget.parentId ?? screen.root.id;
+    const parent = findWidgetById(project.value, parentId);
+    return parent?.locked !== true;
+  }
+
+  function canDeleteWidget(source: WidgetNode | null | undefined): boolean {
+    return Boolean(source && source.type !== "screen" && !source.locked);
   }
 
   function duplicateSelectedWidget(): void {
@@ -503,10 +531,11 @@ export const useProjectStore = defineStore("project", () => {
     }));
   }
 
-  function addScreen(): void {
+  function addScreen(name?: string): void {
     const index = nextScreenIndex(project.value);
     const id = createEditorUUID();
     const rootId = createEditorUUID();
+    const screenName = uniqueScreenName(name?.trim() || `Screen_${index}`, project.value.screens.map((screen) => screen.name));
     execute(replaceProjectDocCommand({
       id: `add-screen-${id}`,
       label: "Add screen",
@@ -517,11 +546,11 @@ export const useProjectStore = defineStore("project", () => {
             ...doc.screens,
             {
               id,
-              name: `Screen_${index}`,
+              name: screenName,
               root: {
                 id: rootId,
                 type: "screen",
-                name: `Screen_${index}`,
+                name: screenName,
                 parentId: null,
                 children: [],
                 layout: {
@@ -825,7 +854,13 @@ export const useProjectStore = defineStore("project", () => {
     projects,
     activeScreen,
     selectedWidget,
+    copiedWidgetName,
+    canCopySelectedWidget,
+    canPasteCopiedWidget,
+    canDeleteSelectedWidget,
     canDuplicateSelectedWidget,
+    canRedo,
+    canUndo,
     selectedWidgetId,
     saveState,
     saveError,
@@ -1078,6 +1113,14 @@ function nextCopyName(existingNames: Set<string>, sourceName: string): string {
     candidate = `${sourceName}_${index}`;
   }
   return candidate;
+}
+
+function uniqueScreenName(name: string, existingNames: string[]): string {
+  const names = new Set(existingNames);
+  if (!names.has(name)) {
+    return name;
+  }
+  return nextCopyName(names, name);
 }
 
 function collectExistingWidgetNames(doc: ProjectDoc): Set<string> {

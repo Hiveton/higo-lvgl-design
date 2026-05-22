@@ -115,11 +115,16 @@ export const useAssetsStore = defineStore("assets", () => {
     }
   }
 
+  function clearError(): void {
+    error.value = null;
+  }
+
   return {
     assets,
     previewUrls,
     loading,
     error,
+    clearError,
     loadAssets,
     uploadAsset,
     deleteAsset

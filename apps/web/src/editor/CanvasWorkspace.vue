@@ -1,58 +1,84 @@
 <template>
   <section class="center-region">
     <div class="canvas-toolbar">
-      <strong>Canvas</strong>
-      <span data-testid="active-screen-label">{{ activeScreenName }}</span>
+      <strong data-testid="center-panel-title">{{ centerPanelTitle }}</strong>
+      <span class="screen-tab" data-testid="active-screen-label">{{ activeScreenName }}</span>
+      <button class="mini-action screen-tab-add" aria-label="Add screen from canvas toolbar" title="Add screen from canvas toolbar" data-testid="canvas-add-screen-button" type="button" @click="emit('add-screen')"><IconGlyph name="add" /></button>
       <span class="toolbar-spacer" />
-      <button class="select-like" data-testid="canvas-target-settings-button" @click="emit('show-settings')">
+      <button
+        class="select-like"
+        type="button"
+        data-testid="canvas-target-settings-button"
+        :aria-label="`Open target settings for ${project.target.width} x ${project.target.height}`"
+        :title="`Open target settings for ${project.target.width} x ${project.target.height}`"
+        @click="emit('show-settings')"
+      >
         {{ project.target.width }} x {{ project.target.height }} ˅
       </button>
-      <button class="icon-button" aria-label="Fit view" data-testid="fit-view-button" @click="emit('fit-view')">⤢</button>
-      <button class="icon-button" aria-label="Fullscreen canvas" data-testid="fullscreen-canvas-button" @click="emit('fullscreen-canvas')">⛶</button>
-      <select class="select-like" data-testid="zoom-select" :value="zoomPercent" @change="updateZoom">
+      <button class="icon-button" type="button" :aria-label="fitViewLabel" :title="fitViewLabel" data-testid="fit-view-button" @click="emit('fit-view')"><IconGlyph name="fit" /></button>
+      <button class="icon-button" type="button" :aria-label="fullscreenCanvasLabel" :title="fullscreenCanvasLabel" data-testid="fullscreen-canvas-button" @click="emit('fullscreen-canvas')"><IconGlyph name="fullscreen" /></button>
+      <select class="select-like" data-testid="zoom-select" aria-label="Canvas zoom" title="Canvas zoom" :value="zoomPercent" @change="updateZoom">
         <option v-for="level in zoomLevels" :key="level" :value="level">{{ level }}%</option>
       </select>
     </div>
     <div v-if="activeCenterPanel === 'code'" class="code-stage">
+      <header class="code-stage-header">
+        <div>
+          <span class="panel-kicker">Generated Source</span>
+          <strong>{{ activeScreenName ?? "Screen" }}.c</strong>
+        </div>
+        <div class="code-stage-meta">
+          <span data-testid="code-line-count">{{ codeLineCount }} lines</span>
+          <span>{{ project.target.lvglVersion }} / {{ project.target.colorDepth }} bit</span>
+        </div>
+        <div class="code-stage-actions">
+          <button class="mini-action" type="button" data-testid="copy-code-button" :aria-label="copyCodeLabel" :title="copyCodeLabel" @click="emit('copy-generated-code')"><IconGlyph name="copy" /></button>
+          <button class="select-like" type="button" data-testid="code-back-to-canvas-button" :aria-label="backToCanvasLabel" :title="backToCanvasLabel" @click="emit('show-canvas')">Back to Canvas</button>
+        </div>
+      </header>
+      <p class="code-stage-status" data-testid="code-copy-status" role="status" aria-live="polite" aria-atomic="true">{{ codeCopyStatus }}</p>
       <pre data-testid="code-preview">{{ codePreview }}</pre>
     </div>
     <div v-else-if="activeCenterPanel === 'settings'" class="settings-stage" data-testid="settings-panel">
       <section class="settings-card">
-        <h2>Project Settings</h2>
+        <div class="settings-card-header">
+          <h2>Project Settings</h2>
+          <button class="select-like" type="button" data-testid="settings-back-to-canvas-button" :aria-label="backToCanvasLabel" :title="backToCanvasLabel" @click="emit('show-canvas')">Back to Canvas</button>
+        </div>
         <div class="settings-form">
-          <label>Project Name<input data-testid="settings-project-name-input" :value="project.name" @input="emitText('rename-project', $event)" /></label>
+          <label>Project Name<input data-testid="settings-project-name-input" aria-label="Project name" title="Project name" :value="project.name" @input="emitText('rename-project', $event)" /></label>
           <label>
             Device
-            <input data-testid="settings-target-device-name-input" :value="project.target.deviceName" @input="emitText('update-target-device-name', $event)" />
-            <p v-if="inspectorErrors['target-device-name']" class="field-error" data-testid="settings-target-device-name-error">{{ inspectorErrors['target-device-name'] }}</p>
+            <input data-testid="settings-target-device-name-input" aria-label="Target device name" title="Target device name" :value="project.target.deviceName" :aria-invalid="inspectorErrors['target-device-name'] ? 'true' : undefined" :aria-describedby="inspectorErrors['target-device-name'] ? 'settings-target-device-name-error' : undefined" @input="emitText('update-target-device-name', $event)" />
+            <p v-if="inspectorErrors['target-device-name']" id="settings-target-device-name-error" class="field-error" data-testid="settings-target-device-name-error" role="alert">{{ inspectorErrors['target-device-name'] }}</p>
           </label>
           <label>
             LVGL Version
-            <select data-testid="settings-target-lvgl-version-select" :value="project.target.lvglVersion" @change="emitText('update-target-lvgl-version', $event)">
+            <select data-testid="settings-target-lvgl-version-select" aria-label="Target LVGL version" title="Target LVGL version" :value="project.target.lvglVersion" @change="emitText('update-target-lvgl-version', $event)">
               <option value="8.3">8.3</option>
             </select>
           </label>
           <div class="settings-form-row">
             <label>
               Width
-              <input data-testid="settings-target-width-input" :value="project.target.width" @input="emitTargetNumber('width', $event)" />
-              <p v-if="inspectorErrors['target-width']" class="field-error" data-testid="settings-target-width-error">{{ inspectorErrors['target-width'] }}</p>
+              <input data-testid="settings-target-width-input" type="number" aria-label="Target width" title="Target width" min="1" step="1" :value="project.target.width" :aria-invalid="inspectorErrors['target-width'] ? 'true' : undefined" :aria-describedby="inspectorErrors['target-width'] ? 'settings-target-width-error' : undefined" @input="emitTargetNumber('width', $event)" />
+              <p v-if="inspectorErrors['target-width']" id="settings-target-width-error" class="field-error" data-testid="settings-target-width-error" role="alert">{{ inspectorErrors['target-width'] }}</p>
             </label>
             <label>
               Height
-              <input data-testid="settings-target-height-input" :value="project.target.height" @input="emitTargetNumber('height', $event)" />
-              <p v-if="inspectorErrors['target-height']" class="field-error" data-testid="settings-target-height-error">{{ inspectorErrors['target-height'] }}</p>
+              <input data-testid="settings-target-height-input" type="number" aria-label="Target height" title="Target height" min="1" step="1" :value="project.target.height" :aria-invalid="inspectorErrors['target-height'] ? 'true' : undefined" :aria-describedby="inspectorErrors['target-height'] ? 'settings-target-height-error' : undefined" @input="emitTargetNumber('height', $event)" />
+              <p v-if="inspectorErrors['target-height']" id="settings-target-height-error" class="field-error" data-testid="settings-target-height-error" role="alert">{{ inspectorErrors['target-height'] }}</p>
             </label>
           </div>
           <div class="settings-form-row">
             <label>
               DPI
-              <input data-testid="settings-target-dpi-input" :value="project.target.dpi" @input="emitTargetNumber('dpi', $event)" />
-              <p v-if="inspectorErrors['target-dpi']" class="field-error" data-testid="settings-target-dpi-error">{{ inspectorErrors['target-dpi'] }}</p>
+              <input data-testid="settings-target-dpi-input" type="number" aria-label="Target DPI" title="Target DPI" min="1" step="1" :value="project.target.dpi" :aria-invalid="inspectorErrors['target-dpi'] ? 'true' : undefined" :aria-describedby="inspectorErrors['target-dpi'] ? 'settings-target-dpi-error' : undefined" @input="emitTargetNumber('dpi', $event)" />
+              <p v-if="inspectorErrors['target-dpi']" id="settings-target-dpi-error" class="field-error" data-testid="settings-target-dpi-error" role="alert">{{ inspectorErrors['target-dpi'] }}</p>
             </label>
             <label>
               Color Depth
-              <select data-testid="settings-target-color-depth-select" :value="project.target.colorDepth" @change="emitText('update-target-color-depth', $event)">
+              <select data-testid="settings-target-color-depth-select" aria-label="Target color depth" title="Target color depth" :value="project.target.colorDepth" @change="emitText('update-target-color-depth', $event)">
                 <option value="16">16 bit</option>
                 <option value="32">32 bit</option>
               </select>
@@ -60,7 +86,7 @@
           </div>
           <label>
             Theme
-            <select data-testid="settings-theme-select" :value="project.theme" @change="emitTheme">
+            <select data-testid="settings-theme-select" aria-label="Project theme" title="Project theme" :value="project.theme" @change="emitTheme">
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
@@ -68,9 +94,9 @@
         </div>
         <div class="settings-summary">
           <span>Target</span>
-          <strong>LVGL {{ project.target.lvglVersion }} / {{ project.target.deviceName }} / {{ project.target.width }} x {{ project.target.height }} / {{ project.target.dpi }} DPI</strong>
+          <strong class="settings-summary-value" data-testid="settings-summary-target">LVGL {{ project.target.lvglVersion }} / {{ project.target.deviceName }} / {{ project.target.width }} x {{ project.target.height }} / {{ project.target.dpi }} DPI</strong>
           <span>Save</span>
-          <strong>{{ saveStateLabel }}</strong>
+          <strong class="settings-summary-value" data-testid="settings-summary-save">{{ saveStateLabel }}</strong>
         </div>
       </section>
     </div>
@@ -120,7 +146,7 @@
             data-testid="alignment-guide-horizontal"
             :style="{ top: `${guide}px` }"
           />
-          <div class="device-surface" :style="deviceSurfaceStyle">
+          <div class="device-surface" :class="{ empty: renderedWidgets.length === 0 }" :style="deviceSurfaceStyle" data-testid="device-surface">
             <WidgetRenderer
               v-for="item in renderedWidgets"
               :key="item.widget.id"
@@ -142,8 +168,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
+import IconGlyph from "./IconGlyph.vue";
 import WidgetRenderer from "./WidgetRenderer.vue";
 
 export type RenderedWidget = {
@@ -152,13 +179,14 @@ export type RenderedWidget = {
   y: number;
 };
 
-defineProps<{
+const props = defineProps<{
   activeCenterPanel: "canvas" | "code" | "settings";
   activeScreenName?: string;
   alignmentGuides: { vertical: number[]; horizontal: number[] };
   artboardStyle: Record<string, string>;
   canvasPanStyle: Record<string, string>;
   codePreview: string;
+  codeCopyStatus: string;
   deviceSurfaceStyle: Record<string, string>;
   gridEnabled: boolean;
   imagePreviewUrl: (widget: WidgetNode) => string | null;
@@ -179,13 +207,16 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
+  "add-screen": [];
   "artboard-mounted": [element: HTMLElement];
+  "copy-generated-code": [];
   "drop-widget": [event: DragEvent];
   "fit-view": [];
   "fullscreen-canvas": [];
   "rename-project": [name: string];
   "select-widget": [widgetId: string];
   "show-settings": [];
+  "show-canvas": [];
   "start-canvas-pan": [event: MouseEvent];
   "start-move": [widget: WidgetNode, event: MouseEvent];
   "start-resize": [widget: WidgetNode, event: MouseEvent];
@@ -199,6 +230,22 @@ const emit = defineEmits<{
 }>();
 
 const artboardRef = ref<HTMLElement | null>(null);
+const codeLineCount = computed(() => props.codePreview.split("\n").filter(Boolean).length);
+const canvasScreenName = computed(() => props.activeScreenName ?? "current screen");
+const codeFileName = computed(() => `${props.activeScreenName ?? "Screen"}.c`);
+const copyCodeLabel = computed(() => `Copy generated code for ${codeFileName.value}`);
+const fitViewLabel = computed(() => `Fit ${canvasScreenName.value} canvas view`);
+const fullscreenCanvasLabel = computed(() => `Open ${canvasScreenName.value} canvas fullscreen`);
+const backToCanvasLabel = computed(() => `Back to ${canvasScreenName.value} canvas`);
+const centerPanelTitle = computed(() => {
+  if (props.activeCenterPanel === "code") {
+    return "Code";
+  }
+  if (props.activeCenterPanel === "settings") {
+    return "Settings";
+  }
+  return "Canvas";
+});
 
 onMounted(() => {
   if (artboardRef.value) {
