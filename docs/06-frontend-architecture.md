@@ -50,6 +50,11 @@ src/
     assets.ts
     simulator.ts
     jobs.ts
+    locale.ts
+  i18n/
+    copy.ts
+    types.ts
+    useCopy.ts
   commands/
     types.ts
     widgetCommands.ts
@@ -154,6 +159,22 @@ type HistoryState = {
 
 - 创建 Build job 后轮询状态。
 - 将 job 状态写入 Log。
+
+### useLocaleStore
+
+职责：
+
+- 保存当前编辑器语言。
+- 支持 `en-US` 和 `zh-CN`。
+- 使用 localStorage 持久化语言选择。
+- 只影响编辑器 chrome、操作提示和错误文案，不写入 `ProjectDoc`。
+
+## i18n/copy
+
+- `apps/web/src/i18n/copy.ts` 维护 `en-US` 与 `zh-CN` 的 UI copy dictionary。
+- `apps/web/src/i18n/useCopy.ts` 根据 `useLocaleStore().locale` 返回当前语言文案。
+- 组件新增用户可见文案时，优先进入 copy dictionary；代码符号、LVGL 枚举、API path、ProjectDoc 字段、资源文件名保持英文原文。
+- 顶部工具栏是第一批接入范围，Inspector、Assets、Layers、Screens、Log、Simulator 和 Preview 后续按模块逐步替换硬编码。
 
 ## Command 模型
 

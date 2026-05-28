@@ -1,4 +1,4 @@
-import type { ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
+import type { AssetRef, ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
 import { createEmscriptenLvglBridge, type EmscriptenRuntimeModule } from "./emscriptenBridge";
 export { createEmscriptenLvglBridge };
 
@@ -7,9 +7,12 @@ export type LvglRuntime = {
   renderProject(doc: ProjectDoc): Promise<void>;
   resize(width: number, height: number): void;
   destroy(): void;
+  getRuntimeKind?: () => LvglRuntimeKind;
   getLastRenderedScreenName(): string | null;
   getLastRenderedWidgetNames(): string[];
 };
+
+export type LvglRuntimeKind = "canvas" | "wasm" | "unknown";
 
 export type LvglRuntimeModule = {
   createLvglRuntime?: () => LvglRuntime | Promise<LvglRuntime>;
@@ -49,7 +52,10 @@ export type LoadRuntimeOptions = {
   wasmModuleUrl?: string;
   fallbackToCanvas?: boolean;
   renderTimeoutMs?: number;
+  assetResolver?: AssetResolver;
 };
+
+export type AssetResolver = (asset: AssetRef) => string | null | undefined | Promise<string | null | undefined>;
 
 export type SimulatorErrorCode =
   | "RUNTIME_LOAD_FAILED"
@@ -90,7 +96,7 @@ export async function loadRuntime(options: LoadRuntimeOptions = {}): Promise<Lvg
       }
     }
   }
-  return withRenderTimeout(new CanvasPreviewRuntime(), options.renderTimeoutMs);
+  return withRenderTimeout(new CanvasPreviewRuntime(options.assetResolver), options.renderTimeoutMs);
 }
 
 async function runtimeFromModule(module: LvglRuntimeModule): Promise<LvglRuntime> {
@@ -178,6 +184,10 @@ class TimedRuntime implements LvglRuntime {
     this.inner.destroy();
   }
 
+  getRuntimeKind(): LvglRuntimeKind {
+    return this.inner.getRuntimeKind?.() ?? "unknown";
+  }
+
   getLastRenderedScreenName(): string | null {
     return this.inner.getLastRenderedScreenName();
   }
@@ -255,6 +265,10 @@ class LvglWasmRuntimeAdapter implements LvglRuntime {
   getLastRenderedWidgetNames(): string[] {
     return this.bridge.getLastRenderedWidgetNames?.() ?? [...this.lastRenderedWidgetNames];
   }
+
+  getRuntimeKind(): LvglRuntimeKind {
+    return "wasm";
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -278,6 +292,9 @@ class CanvasPreviewRuntime implements LvglRuntime {
   private canvas: HTMLCanvasElement | null = null;
   private lastRenderedScreenName: string | null = null;
   private lastRenderedWidgetNames: string[] = [];
+  private readonly imageCache = new Map<string, Promise<HTMLImageElement>>();
+
+  constructor(private readonly assetResolver?: AssetResolver) {}
 
   async mount(canvas: HTMLCanvasElement): Promise<void> {
     this.canvas = canvas;
@@ -327,7 +344,7 @@ class CanvasPreviewRuntime implements LvglRuntime {
       return;
     }
     for (const bounds of resolveChildrenBounds(screen.root, rootBounds)) {
-      this.drawWidget(context, doc, bounds);
+      await this.drawWidget(context, doc, bounds);
     }
   }
 
@@ -353,7 +370,11 @@ class CanvasPreviewRuntime implements LvglRuntime {
     return [...this.lastRenderedWidgetNames];
   }
 
-  private drawWidget(context: CanvasRenderingContext2D, doc: ProjectDoc, bounds: WidgetBounds): void {
+  getRuntimeKind(): LvglRuntimeKind {
+    return "canvas";
+  }
+
+  private async drawWidget(context: CanvasRenderingContext2D, doc: ProjectDoc, bounds: WidgetBounds): Promise<void> {
     const { widget, x, y, width, height } = bounds;
     if (widget.hidden) {
       return;
@@ -372,13 +393,55 @@ class CanvasPreviewRuntime implements LvglRuntime {
     context.font = fontFor(widget);
     context.textAlign = canvasTextAlignFor(widget);
     context.textBaseline = "middle";
-    drawWidgetContent(context, doc, widget, x, y, width, height);
+    await drawWidgetContent(context, doc, widget, x, y, width, height, (asset) => this.loadAssetImage(asset));
     context.restore();
 
     for (const childBounds of resolveChildrenBounds(widget, bounds)) {
-      this.drawWidget(context, doc, childBounds);
+      await this.drawWidget(context, doc, childBounds);
     }
   }
+
+  private async loadAssetImage(asset: AssetRef): Promise<HTMLImageElement | null> {
+    const source = await resolveAssetSource(asset, this.assetResolver);
+    if (!source) {
+      return null;
+    }
+    const cacheKey = `${asset.id}:${source}`;
+    let pending = this.imageCache.get(cacheKey);
+    if (!pending) {
+      pending = loadImageElement(source);
+      this.imageCache.set(cacheKey, pending);
+    }
+    try {
+      return await pending;
+    } catch {
+      this.imageCache.delete(cacheKey);
+      return null;
+    }
+  }
+}
+
+async function resolveAssetSource(asset: AssetRef, assetResolver?: AssetResolver): Promise<string | null> {
+  const resolved = assetResolver ? await assetResolver(asset) : null;
+  if (resolved) {
+    return resolved;
+  }
+  if (/^(data:|blob:|https?:\/\/)/.test(asset.objectKey)) {
+    return asset.objectKey;
+  }
+  return null;
+}
+
+function loadImageElement(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    if (/^https?:\/\//.test(source)) {
+      image.crossOrigin = "anonymous";
+    }
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`failed to load image asset: ${source}`));
+    image.src = source;
+  });
 }
 
 function isJsdom(): boolean {
@@ -601,8 +664,9 @@ function drawWidgetContent(
   x: number,
   y: number,
   width: number,
-  height: number
-): void {
+  height: number,
+  loadAssetImage: (asset: AssetRef) => Promise<HTMLImageElement | null>
+): Promise<void> | void {
   switch (widget.type) {
     case "label":
     case "button":
@@ -612,7 +676,16 @@ function drawWidgetContent(
       break;
     case "image": {
       const asset = doc.assets.find((item) => item.id === widget.props.assetId);
-      context.fillText(asset?.name ?? widget.name, textXFor(widget, x, width), y + height / 2, width - 8);
+      if (asset) {
+        return loadAssetImage(asset).then((image) => {
+          if (image) {
+            context.drawImage(image, x, y, width, height);
+            return;
+          }
+          context.fillText(asset.name, textXFor(widget, x, width), y + height / 2, width - 8);
+        });
+      }
+      context.fillText(widget.name, textXFor(widget, x, width), y + height / 2, width - 8);
       break;
     }
     case "bar":
@@ -678,15 +751,18 @@ function drawChartPreview(context: CanvasRenderingContext2D, widget: WidgetNode,
 
 function chartValues(widget: WidgetNode): number[] {
   const rawValues = widget.props.values;
+  const min = numericProp(widget, "min", 0);
+  const max = numericProp(widget, "max", 100);
+  const pointCount = Math.max(1, Math.floor(numericProp(widget, "pointCount", 8)));
   if (Array.isArray(rawValues)) {
-    const values = rawValues.filter((value) => typeof value === "number" && Number.isFinite(value));
+    const values = rawValues
+      .filter((value) => typeof value === "number" && Number.isFinite(value))
+      .slice(0, pointCount)
+      .map((value) => Math.max(min, Math.min(max, value)));
     if (values.length) {
       return values;
     }
   }
-  const min = numericProp(widget, "min", 0);
-  const max = numericProp(widget, "max", 100);
-  const pointCount = Math.max(1, Math.floor(numericProp(widget, "pointCount", 8)));
   const span = Math.max(0, max - min);
   return Array.from({ length: pointCount }, (_unused, index) => min + ((index * 37 + 20) % (span + 1)));
 }

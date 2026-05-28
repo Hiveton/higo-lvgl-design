@@ -178,8 +178,8 @@
         role="separator"
         tabindex="0"
         aria-orientation="horizontal"
-        aria-label="Resize bottom dock"
-        title="Resize bottom dock"
+        :aria-label="copy.bottomDock.resize"
+        :title="copy.bottomDock.resize"
         aria-valuemin="180"
         aria-valuemax="420"
         :aria-valuenow="bottomDockEffectiveHeight"
@@ -189,7 +189,7 @@
       />
       <AssetsPanel
         data-testid="resources-panel"
-        aria-label="Resources"
+        :aria-label="copy.bottomDock.resources"
         :class="{ active: activeNavItem === 'resources' }"
         :assets="assetsStore.assets"
         :usage-counts="assetUsageCounts"
@@ -199,6 +199,7 @@
         @upload="uploadAsset"
         @delete-asset="deleteAsset"
         @bind-image-asset="bindAssetFromPanel"
+        @import-reference-asset="importReferenceAsset"
       />
       <LogPanel
         v-model="bottomLogTab"
@@ -215,6 +216,7 @@
         :background="simulatorBackground"
         :screenshot-url="simulatorScreenshotUrl"
         :status="simulatorStatus"
+        :runtime-kind="simulatorRuntimeKind"
         :message="simulatorMessage"
         @fullscreen="requestSimulatorFullscreen"
         @mounted="handleSimulatorCanvasMounted"
@@ -236,9 +238,11 @@
     <PreviewOverlay
       v-if="previewOpen"
       :active-screen-name="activeScreen?.name"
+      :event-bindings="project.events"
       :image-preview-url="imagePreviewUrl"
       :preview-device-style="previewDeviceStyle"
       :preview-screenshot-url="previewScreenshotUrl"
+      :preview-screenshot-disabled="previewScreenshotDisabled"
       :preview-status-message="previewStatusMessage"
       :rendered-widgets="renderedWidgets"
       :target-label="targetLabel"
@@ -246,6 +250,8 @@
       :widget-style="widgetStyle"
       :widget-text="widgetText"
       @close="closePreview"
+      @preview-interaction="handlePreviewInteraction"
+      @preview-event="handlePreviewEvent"
       @refresh="refreshPreview"
       @screenshot="capturePreviewScreenshot"
     />
@@ -262,18 +268,18 @@
       @keydown.tab="handleDialogTabKeydown($event)"
     >
       <form class="confirm-dialog" @submit.prevent="createNewProject">
-        <strong id="new-project-dialog-title">Create cloud project</strong>
-        <p id="new-project-dialog-description">Name the LVGL project before creating it in cloud storage.</p>
+        <strong id="new-project-dialog-title">{{ copy.dialogs.newProjectTitle }}</strong>
+        <p id="new-project-dialog-description">{{ copy.dialogs.newProjectDescription }}</p>
         <label class="dialog-field">
-          Project Name
+          {{ copy.dialogs.newProjectName }}
           <input
             v-model="newProjectName"
             ref="newProjectNameInput"
             data-testid="new-project-name-input"
-            aria-label="Cloud project name"
+            :aria-label="copy.dialogs.newProjectNameA11y"
             :aria-describedby="newProjectNameError ? 'new-project-name-error' : undefined"
             :aria-invalid="newProjectNameError ? 'true' : undefined"
-            title="Cloud project name"
+            :title="copy.dialogs.newProjectNameA11y"
             autocomplete="off"
             maxlength="80"
             @input="clearNewProjectNameError"
@@ -281,8 +287,8 @@
         </label>
         <p v-if="newProjectNameError" id="new-project-name-error" class="field-error" data-testid="new-project-name-error" role="alert">{{ newProjectNameError }}</p>
         <div class="confirm-actions">
-          <button class="select-like" data-testid="cancel-new-project-button" type="button" aria-label="Cancel creating cloud project" title="Cancel creating cloud project" @click="closeNewProjectDialog">Cancel</button>
-          <button class="primary-action" data-testid="confirm-new-project-button" type="submit" :aria-label="newProjectConfirmLabel" :title="newProjectConfirmLabel">Create project</button>
+          <button class="select-like" data-testid="cancel-new-project-button" type="button" :aria-label="copy.dialogs.cancelNewProject" :title="copy.dialogs.cancelNewProject" @click="closeNewProjectDialog">{{ copy.dialogs.cancel }}</button>
+          <button class="primary-action" data-testid="confirm-new-project-button" type="submit" :aria-label="newProjectConfirmLabel" :title="newProjectConfirmLabel">{{ copy.dialogs.createProject }}</button>
         </div>
       </form>
     </section>
@@ -299,8 +305,8 @@
       @keydown.tab="handleDialogTabKeydown($event)"
     >
       <div class="confirm-dialog">
-        <strong id="asset-delete-confirm-title">Delete referenced asset?</strong>
-        <p id="asset-delete-confirm-description" role="alert">{{ pendingAssetDelete.name }} is used by {{ pendingAssetDelete.usageCount }} image widget{{ pendingAssetDelete.usageCount === 1 ? "" : "s" }}. Deleting it will clear those image references.</p>
+        <strong id="asset-delete-confirm-title">{{ copy.dialogs.assetDeleteTitle }}</strong>
+        <p id="asset-delete-confirm-description" role="alert">{{ copy.dialogs.assetDeleteDescription(pendingAssetDelete.name, pendingAssetDelete.usageCount) }}</p>
         <div class="confirm-actions">
           <button
             ref="assetDeleteCancelButton"
@@ -311,7 +317,7 @@
             :title="assetDeleteCancelLabel"
             @click="cancelAssetDelete"
           >
-            Cancel
+            {{ copy.dialogs.cancel }}
           </button>
           <button
             class="danger-action"
@@ -321,7 +327,7 @@
             :title="assetDeleteConfirmLabel"
             @click="confirmAssetDelete"
           >
-            Delete asset
+            {{ copy.dialogs.assetDeleteConfirm() }}
           </button>
         </div>
       </div>
@@ -335,14 +341,17 @@ let activeEditorShellToken = 0;
 </script>
 
 <script setup lang="ts">
-import { widgetCatalog, type EventBinding, type ProjectDoc, type WidgetNode } from "@hiveton-lvgl/schema";
+import { widgetCatalog, type AssetRef, type EventBinding, type LayoutBox, type ProjectDoc, type WidgetNode } from "@hiveton-lvgl/schema";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { loadRuntime, SimulatorRuntimeError, type LvglRuntime } from "@hiveton-lvgl/lvgl-wasm-runtime";
 import { getAuthToken } from "../api/auth";
 import { downloadJobResult } from "../api/jobs";
+import { localizedErrorForCode, localizeError } from "../i18n/errors";
+import { useCopy } from "../i18n/useCopy";
 import { useAssetsStore } from "../stores/assets";
 import { useAuthStore } from "../stores/auth";
 import { useJobsStore } from "../stores/jobs";
+import { useLocaleStore } from "../stores/locale";
 import { useProjectStore } from "../stores/project";
 import { useSimulatorStore } from "../stores/simulator";
 import AssetsPanel from "./AssetsPanel.vue";
@@ -356,6 +365,7 @@ import ScreensPanel from "./ScreensPanel.vue";
 import SidebarNav, { type SidebarNavItem } from "./SidebarNav.vue";
 import SimulatorPanel from "./SimulatorPanel.vue";
 import StatusBar from "./StatusBar.vue";
+import { toTestId } from "./testId";
 import TopToolbar from "./TopToolbar.vue";
 import WidgetPalette from "./WidgetPalette.vue";
 
@@ -364,6 +374,8 @@ const assetsStore = useAssetsStore();
 const authStore = useAuthStore();
 const jobsStore = useJobsStore();
 const simulatorStore = useSimulatorStore();
+const localeStore = useLocaleStore();
+const copy = useCopy();
 const editorShellToken = ++nextEditorShellToken;
 const project = computed(() => projectStore.project);
 const activeScreen = computed(() => projectStore.activeScreen);
@@ -399,31 +411,32 @@ const assetUsageCounts = computed(() => {
 });
 const saveStateLabel = computed(() => {
   if (projectStore.saveState === "saving") {
-    return "Saving...";
+    return copy.value.status.saving;
   }
   if (projectStore.saveState === "failed") {
-    return "Save failed";
+    return copy.value.status.saveFailed;
   }
   if (projectStore.dirty) {
-    return "Unsaved changes";
+    return copy.value.status.unsavedChanges;
   }
-  return "All changes saved";
+  return copy.value.status.allChangesSaved;
 });
 const persistenceLabel = computed(() => {
   if (!authUser.value) {
-    return "Local project";
+    return copy.value.status.localProject;
   }
   if (projectStore.saveState === "failed") {
-    return "Cloud save unavailable";
+    return copy.value.status.cloudSaveUnavailable;
   }
   if (project.value.id === "project-watch-demo") {
-    return "Cloud project not created";
+    return copy.value.status.cloudProjectNotCreated;
   }
-  return "Project saved to cloud";
+  return copy.value.status.projectSavedToCloud;
 });
-const selectedEvents = computed(() =>
-  project.value.events.filter((event) => event.widgetId === selectedWidget.value?.id)
-);
+const selectedEvents = computed(() => {
+  const targetId = eventTargetWidgetId.value || selectedWidget.value?.id;
+  return project.value.events.filter((event) => event.widgetId === targetId);
+});
 const hasDuplicateScreenNames = computed(() => {
   const names = project.value.screens.map((screen) => screen.name.trim()).filter(Boolean);
   return new Set(names).size !== names.length;
@@ -444,7 +457,7 @@ const timelineItems = computed(() => [
   ...projectStore.historyEntries.slice(-12).reverse().map((entry) => ({
     id: `history-${entry.id}`,
     kind: "Command",
-    label: entry.label,
+    label: copy.value.bottomDock.commandMessageLabel(entry.message),
     status: entry.status
   }))
 ]);
@@ -462,12 +475,12 @@ const latestActivityMessage = computed(() => {
       const afterSignOut = visibleEntries.slice(signedOutIndex + 1);
       const hasNewUserFacingActivity = afterSignOut.some((entry) => entry.id !== "log-project-saved");
       if (!hasNewUserFacingActivity) {
-        return visibleEntries[signedOutIndex]?.message ?? "Signed out; local editing remains";
+        return visibleEntries[signedOutIndex]?.message ?? copy.value.status.signedOutLocalEditing;
       }
     }
   }
   const latest = [...visibleEntries].reverse().at(0);
-  return latest?.message ?? "Editor ready";
+  return latest?.message ?? copy.value.status.editorReady;
 });
 const eventType = ref<EventBinding["event"]>("LV_EVENT_CLICKED");
 const eventHandler = ref("on_time_clicked");
@@ -481,7 +494,7 @@ const simulatorRenderTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const activeCenterPanel = ref<"canvas" | "code" | "settings">("canvas");
 const activeNavItem = ref<SidebarNavItem>("widgets");
 const activeInspectorTab = ref<InspectorTab>("style");
-const codeCopyStatus = ref("Ready to copy");
+const codeCopyStatus = ref(copy.value.runtime.readyToCopy);
 const bottomLogTab = ref<"log" | "timeline">("log");
 const bottomDockCollapsed = ref(false);
 const bottomDockHeight = ref(248);
@@ -491,6 +504,7 @@ const inspectorErrors = ref<Record<string, string>>({});
 const exportDownloadUrl = computed(() => jobsStore.exportDownloadUrl);
 const buildStatus = computed(() => jobsStore.buildStatus);
 const simulatorStatus = computed(() => simulatorStore.status);
+const simulatorRuntimeKind = computed(() => simulatorStore.runtimeKind);
 const simulatorMessage = computed(() => simulatorStore.message);
 const simulatorVisible = ref(true);
 const simulatorBackground = ref<"dark" | "light">("dark");
@@ -498,23 +512,26 @@ const simulatorScreenshotUrl = ref<string | null>(null);
 const previewOpen = ref(false);
 const previewReturnFocusElement = ref<HTMLElement | null>(null);
 const previewScreenshotUrl = ref<string | null>(null);
-const previewStatusMessage = ref("Live preview ready");
+const previewStatusMessage = ref(copy.value.runtime.previewLiveReady);
+const previewInteractionDirty = ref(false);
+const previewStatusSequence = ref(0);
+const previewScreenshotDisabled = computed(() => simulatorStore.status === "failed" || previewInteractionDirty.value);
 const pendingAssetDelete = ref<null | { assetId: string; name: string; usageCount: number }>(null);
 const assetDeleteCancelLabel = computed(() =>
-  pendingAssetDelete.value ? `Cancel deleting ${pendingAssetDelete.value.name} asset` : "Cancel deleting asset"
+  copy.value.dialogs.assetDeleteCancel(pendingAssetDelete.value?.name)
 );
 const assetDeleteConfirmLabel = computed(() =>
-  pendingAssetDelete.value ? `Delete ${pendingAssetDelete.value.name} asset` : "Delete asset"
+  copy.value.dialogs.assetDeleteConfirm(pendingAssetDelete.value?.name)
 );
 const newProjectDialogOpen = ref(false);
 const newProjectReturnFocusElement = ref<HTMLElement | null>(null);
 const assetDeleteReturnFocusElement = ref<HTMLElement | null>(null);
-const newProjectName = ref("Untitled LVGL UI");
+const newProjectName = ref(copy.value.runtime.untitledProjectName);
 const newProjectNameError = ref<string | null>(null);
 const newProjectNameInput = ref<HTMLInputElement | null>(null);
 const newProjectConfirmLabel = computed(() => {
   const name = newProjectName.value.trim();
-  return name ? `Create ${name} cloud project` : "Create cloud project";
+  return copy.value.dialogs.createProjectNamed(name);
 });
 const assetDeleteCancelButton = ref<HTMLButtonElement | null>(null);
 const simulatorWasmModuleUrl = import.meta.env.VITE_LVGL_WASM_MODULE_URL?.trim() || undefined;
@@ -533,9 +550,9 @@ const bottomDockStyle = computed(() => ({
   "--bottom-dock-height": bottomDockCollapsed.value ? "36px" : `${bottomDockEffectiveHeight.value}px`
 }));
 const bottomDockCollapseLabel = computed(() =>
-  bottomDockCollapsed.value ? "Expand console simulator and build dock" : "Collapse console simulator and build dock"
+  bottomDockCollapsed.value ? copy.value.bottomDock.expand : copy.value.bottomDock.collapse
 );
-const bottomDockHeightValueText = computed(() => `Bottom dock height ${bottomDockEffectiveHeight.value} pixels`);
+const bottomDockHeightValueText = computed(() => copy.value.bottomDock.heightValue(bottomDockEffectiveHeight.value));
 const interaction = ref<null | {
   mode: "move" | "resize" | "pan";
   widgetId: string;
@@ -545,6 +562,11 @@ const interaction = ref<null | {
   startY: number;
   startWidth: number;
   startHeight: number;
+  startLayout?: LayoutBox;
+}>(null);
+const keyboardNudge = ref<null | {
+  widgetId: string;
+  startLayout: LayoutBox;
 }>(null);
 const bottomDockResize = ref<null | {
   startY: number;
@@ -581,11 +603,11 @@ const previewDeviceStyle = computed(() => ({
 const codePreview = computed(() => generateCodePreview());
 
 watch(codePreview, () => {
-  codeCopyStatus.value = "Ready to copy";
+  codeCopyStatus.value = copy.value.runtime.readyToCopy;
 });
 
 const logEntries = ref([
-  { id: "log-editor-ready", time: "10:21:05", message: "Editor ready" }
+  { id: "log-editor-ready", time: "10:21:05", message: copy.value.status.editorReady }
 ]);
 
 onMounted(() => {
@@ -646,18 +668,21 @@ function previewProject(): void {
   void nextTick(() => {
     (document.querySelector('[data-testid="preview-overlay"]') as HTMLElement | null)?.focus();
   });
-  void renderSimulator();
   previewScreenshotUrl.value = null;
-  previewStatusMessage.value = "Live preview ready";
+  previewInteractionDirty.value = false;
+  previewStatusSequence.value += 1;
+  previewStatusMessage.value = copy.value.runtime.previewLiveReady;
+  void syncPreviewRuntimeStatus(copy.value.runtime.previewLiveReady);
   logEntries.value.push({
     id: `log-preview-${logEntries.value.length}`,
     time: "10:21:10",
-    message: "Preview updated"
+    message: copy.value.runtime.previewUpdated
   });
 }
 
 function closePreview(): void {
   previewOpen.value = false;
+  previewInteractionDirty.value = false;
   void nextTick(() => {
     previewReturnFocusElement.value?.focus();
     previewReturnFocusElement.value = null;
@@ -666,55 +691,100 @@ function closePreview(): void {
 
 function refreshPreview(): void {
   previewScreenshotUrl.value = null;
-  previewStatusMessage.value = "Preview refreshed";
-  void renderSimulator();
-  appendLog("Preview updated", "10:21:10");
+  previewInteractionDirty.value = false;
+  previewStatusSequence.value += 1;
+  previewStatusMessage.value = copy.value.runtime.previewRefreshed;
+  void syncPreviewRuntimeStatus(copy.value.runtime.previewRefreshed);
+  appendLog(copy.value.runtime.previewUpdated, "10:21:10");
+}
+
+function handlePreviewInteraction(): void {
+  previewInteractionDirty.value = true;
+  previewStatusSequence.value += 1;
+  previewScreenshotUrl.value = null;
+  previewStatusMessage.value = copy.value.runtime.previewInteractionTemporary;
+  upsertLog("preview-interaction-temporary", "10:21:10", copy.value.runtime.previewInteractionTemporary);
+}
+
+function handlePreviewEvent(widgetId: string, eventName: EventBinding["event"]): void {
+  const bindings = project.value.events.filter((event) => event.widgetId === widgetId && event.event === eventName);
+  for (const binding of bindings) {
+    const message = copy.value.runtime.previewEventTriggered(binding.event, binding.handlerName);
+    previewStatusSequence.value += 1;
+    previewStatusMessage.value = message;
+    appendLog(message, "10:21:10");
+  }
+}
+
+async function syncPreviewRuntimeStatus(successMessage: string): Promise<void> {
+  const sequence = previewStatusSequence.value;
+  await mountSimulator();
+  const rendered = await renderSimulator();
+  if (previewStatusSequence.value !== sequence) {
+    return;
+  }
+  if (!previewOpen.value) {
+    return;
+  }
+  if (previewScreenshotUrl.value) {
+    return;
+  }
+  previewStatusMessage.value = rendered
+    ? successMessage
+    : (simulatorStore.lastError ?? copy.value.runtime.previewFailed);
 }
 
 function capturePreviewScreenshot(): void {
+  if (previewScreenshotDisabled.value) {
+    previewStatusMessage.value = previewInteractionDirty.value
+      ? copy.value.runtime.previewInteractionTemporary
+      : (simulatorStore.lastError ?? copy.value.runtime.previewScreenshotUnavailable);
+    appendLog(previewStatusMessage.value, "10:21:10");
+    return;
+  }
   const canvas = simulatorCanvas.value;
   if (!canvas || typeof canvas.toDataURL !== "function") {
-    previewStatusMessage.value = "Screenshot unavailable";
-    appendLog("Preview screenshot unavailable", "10:21:10");
+    previewStatusMessage.value = copy.value.runtime.previewScreenshotUnavailable;
+    appendLog(copy.value.runtime.previewScreenshotUnavailable, "10:21:10");
     return;
   }
   previewScreenshotUrl.value = canvas.toDataURL("image/png");
-  previewStatusMessage.value = "Screenshot ready";
-  appendLog("Preview screenshot ready", "10:21:10");
+  previewStatusMessage.value = copy.value.runtime.previewScreenshotReady;
+  appendLog(copy.value.runtime.previewScreenshotLogReady, "10:21:10");
 }
 
 function refreshSimulatorPanel(): void {
   simulatorScreenshotUrl.value = null;
   void renderSimulator();
-  appendLog("Simulator refreshed", "10:21:10");
+  appendLog(copy.value.runtime.simulatorRefreshed, "10:21:10");
 }
 
 function captureSimulatorScreenshot(): void {
   const canvas = simulatorCanvas.value;
   if (!canvas || typeof canvas.toDataURL !== "function") {
-    appendLog("Simulator screenshot unavailable", "10:21:10");
+    appendLog(copy.value.runtime.simulatorScreenshotUnavailable, "10:21:10");
     return;
   }
   simulatorScreenshotUrl.value = canvas.toDataURL("image/png");
-  appendLog("Simulator screenshot ready", "10:21:10");
+  appendLog(copy.value.runtime.simulatorScreenshotReady, "10:21:10");
 }
 
 function toggleSimulatorBackground(): void {
   simulatorBackground.value = simulatorBackground.value === "dark" ? "light" : "dark";
-  appendLog(`Simulator background ${simulatorBackground.value}`, "10:21:10");
+  appendLog(copy.value.runtime.simulatorBackground(simulatorBackground.value), "10:21:10");
 }
 
 async function requestSimulatorFullscreen(): Promise<void> {
   const canvas = simulatorCanvas.value as (HTMLCanvasElement & { requestFullscreen?: () => Promise<void> }) | null;
   if (!canvas?.requestFullscreen) {
-    appendLog("Simulator fullscreen unavailable", "10:21:10");
+    appendLog(copy.value.runtime.simulatorFullscreenUnavailable, "10:21:10");
     return;
   }
   try {
     await canvas.requestFullscreen();
-    appendLog("Simulator fullscreen opened", "10:21:10");
+    appendLog(copy.value.runtime.simulatorFullscreenOpened, "10:21:10");
   } catch (error) {
-    appendLog(error instanceof Error ? `Simulator fullscreen failed: ${error.message}` : "Simulator fullscreen failed", "10:21:10");
+    appendLog(error instanceof Error ? copy.value.runtime.simulatorFullscreenFailedWithMessage(error.message) : copy.value.runtime.simulatorFullscreenFailed, "10:21:10");
   }
 }
 
@@ -729,7 +799,7 @@ function toggleSimulatorPanel(): void {
     simulatorRuntime.value?.destroy();
     simulatorRuntime.value = null;
     simulatorCanvas.value = null;
-    simulatorStore.markLoading("Simulator hidden");
+    simulatorStore.markLoading(copy.value.runtime.simulatorHidden);
   }
 }
 
@@ -815,31 +885,31 @@ function fitCanvasToView(): void {
 async function requestCanvasFullscreen(): Promise<void> {
   const stage = artboardRef.value?.closest(".canvas-stage") as (HTMLElement & { requestFullscreen?: () => Promise<void> }) | null;
   if (!stage?.requestFullscreen) {
-    appendLog("Canvas fullscreen unavailable", "10:21:10");
+    appendLog(copy.value.runtime.canvasFullscreenUnavailable, "10:21:10");
     return;
   }
   try {
     await stage.requestFullscreen();
-    appendLog("Canvas fullscreen opened", "10:21:10");
+    appendLog(copy.value.runtime.canvasFullscreenOpened, "10:21:10");
   } catch (error) {
-    appendLog(error instanceof Error ? `Canvas fullscreen failed: ${error.message}` : "Canvas fullscreen failed", "10:21:10");
+    appendLog(error instanceof Error ? copy.value.runtime.canvasFullscreenFailedWithMessage(error.message) : copy.value.runtime.canvasFullscreenFailed, "10:21:10");
   }
 }
 
 async function copyGeneratedCode(): Promise<void> {
   const code = codePreview.value;
   if (!code.trim()) {
-    codeCopyStatus.value = "No code to copy";
+    codeCopyStatus.value = copy.value.runtime.noCodeToCopy;
     return;
   }
-  codeCopyStatus.value = "Copying...";
+  codeCopyStatus.value = copy.value.runtime.copyingCode;
   try {
     await writeClipboardText(code);
-    codeCopyStatus.value = "Code copied";
-    appendLog("Generated code copied to clipboard", "10:21:10");
+    codeCopyStatus.value = copy.value.runtime.codeCopied;
+    appendLog(copy.value.runtime.generatedCodeCopied, "10:21:10");
   } catch (error) {
-    codeCopyStatus.value = "Copy failed";
-    appendLog(error instanceof Error ? `Copy code failed: ${error.message}` : "Copy code failed", "10:21:10");
+    codeCopyStatus.value = copy.value.runtime.codeCopyFailed;
+    appendLog(error instanceof Error ? copy.value.runtime.codeCopyFailedWithMessage(error.message) : copy.value.runtime.codeCopyFailed, "10:21:10");
   }
 }
 
@@ -848,7 +918,7 @@ async function writeClipboardText(text: string): Promise<void> {
     await Promise.race([
       navigator.clipboard.writeText(text),
       new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error("clipboard write timed out")), 1200);
+        window.setTimeout(() => reject(new Error(copy.value.runtime.clipboardWriteTimedOut)), 1200);
       })
     ]);
     return;
@@ -856,7 +926,7 @@ async function writeClipboardText(text: string): Promise<void> {
   if (copyTextWithSelection(text)) {
     return;
   }
-  throw new Error("clipboard API unavailable");
+  throw new Error(copy.value.runtime.clipboardApiUnavailable);
 }
 
 function copyTextWithSelection(text: string): boolean {
@@ -892,10 +962,10 @@ async function loginDemo(): Promise<void> {
 
 function logLoginResult(): void {
   if (authStore.user) {
-    upsertLog("auth-login", "10:21:11", `Logged in as ${authStore.user.displayName}`);
+    upsertLog("auth-login", "10:21:11", copy.value.runtime.loggedInAs(authStore.user.displayName));
     return;
   }
-  upsertLog("auth-login-failed", "10:21:11", `Login failed: ${authStore.error ?? "unknown error"}`);
+  upsertLog("auth-login-failed", "10:21:11", copy.value.runtime.loginFailed(authStore.error ?? copy.value.runtime.unknownError));
 }
 
 function addWidgetFromPalette(type: Exclude<WidgetNode["type"], "screen">): void {
@@ -967,11 +1037,11 @@ function scheduleSimulatorRender(): void {
 
 function openNewProjectDialog(): void {
   if (!getAuthToken()) {
-    upsertLog("project-create-cloud-required", "10:21:11", "Sign in before creating cloud projects");
+    upsertLog("project-create-cloud-required", "10:21:11", copy.value.runtime.signInBeforeCloudProjects);
     return;
   }
   newProjectReturnFocusElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  newProjectName.value = "Untitled LVGL UI";
+  newProjectName.value = copy.value.runtime.untitledProjectName;
   newProjectNameError.value = null;
   newProjectDialogOpen.value = true;
   void nextTick(() => {
@@ -997,7 +1067,7 @@ function clearNewProjectNameError(): void {
 async function createNewProject(): Promise<void> {
   const name = newProjectName.value.trim();
   if (!name) {
-    newProjectNameError.value = "project name is required";
+    newProjectNameError.value = copy.value.runtime.projectNameRequired;
     return;
   }
   try {
@@ -1008,20 +1078,20 @@ async function createNewProject(): Promise<void> {
     logEntries.value.push({
       id: `log-project-created-${logEntries.value.length}`,
       time: "10:21:11",
-      message: "Project created"
+      message: copy.value.runtime.projectCreated
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-create-error-${logEntries.value.length}`,
       time: "10:21:11",
-      message: error instanceof Error ? error.message : "Project create failed"
+      message: localizedOperationError(error, "PROJECT_CREATE_FAILED", copy.value.runtime.projectCreateFailed)
     });
   }
 }
 
 async function loadProjectList(): Promise<void> {
   if (!getAuthToken()) {
-    upsertLog("project-list-cloud-required", "10:21:11", "Sign in before loading cloud projects");
+    upsertLog("project-list-cloud-required", "10:21:11", copy.value.runtime.signInBeforeLoadingProjects);
     return;
   }
   try {
@@ -1029,13 +1099,13 @@ async function loadProjectList(): Promise<void> {
     logEntries.value.push({
       id: `log-project-list-${logEntries.value.length}`,
       time: "10:21:11",
-      message: "Project list loaded"
+      message: copy.value.runtime.projectListLoaded
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-list-error-${logEntries.value.length}`,
       time: "10:21:11",
-      message: error instanceof Error ? error.message : "Project list failed"
+      message: localizedOperationError(error, "PROJECT_LIST_FAILED", copy.value.runtime.projectListFailed)
     });
   }
 }
@@ -1051,13 +1121,13 @@ async function openProject(projectId: string): Promise<void> {
     logEntries.value.push({
       id: `log-project-opened-${logEntries.value.length}`,
       time: "10:21:11",
-      message: "Project opened"
+      message: copy.value.runtime.projectOpened
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-open-error-${logEntries.value.length}`,
       time: "10:21:11",
-      message: error instanceof Error ? error.message : "Project open failed"
+      message: localizedOperationError(error, "PROJECT_LOOKUP_FAILED", copy.value.runtime.projectOpenFailed)
     });
   }
 }
@@ -1073,18 +1143,22 @@ async function buildProject(): Promise<void> {
     }
     const saved = await saveProjectWithLog();
     if (!saved) {
-      throw new Error("Build stopped because project save failed");
+      throw new Error(copy.value.runtime.buildSaveFailed);
     }
     if (isLocalOnlyProject()) {
-      throw new Error("Sign in before Build to create a cloud project and export C code");
+      throw new Error(copy.value.runtime.buildSignInRequired);
     }
     if (autosaveTimer.value) {
       clearTimeout(autosaveTimer.value);
       autosaveTimer.value = null;
     }
-    await jobsStore.startExport(project.value.id);
+    await jobsStore.startExport(project.value.id, {
+      buildFailedMessage: copy.value.runtime.buildFailed,
+      jobStatusMessage: copy.value.runtime.jobStatus,
+      pollTimeoutMessage: copy.value.runtime.jobTimedOut
+    });
   } catch (error) {
-    jobsStore.markFailed(error instanceof Error ? error.message : "Build failed");
+    jobsStore.markFailed(error instanceof Error ? error.message : copy.value.runtime.buildFailed);
   }
 }
 
@@ -1095,7 +1169,7 @@ async function downloadExportZip(): Promise<void> {
   try {
     const archive = await downloadJobResult(exportDownloadUrl.value);
     if (typeof URL.createObjectURL !== "function") {
-      throw new Error("Download is not available in this browser");
+      throw new Error(copy.value.runtime.downloadUnavailable);
     }
     const objectUrl = URL.createObjectURL(archive);
     const link = document.createElement("a");
@@ -1107,26 +1181,26 @@ async function downloadExportZip(): Promise<void> {
     window.setTimeout(() => {
       URL.revokeObjectURL?.(objectUrl);
     }, 1000);
-    upsertLog("export-downloaded", "10:21:12", "Export zip downloaded");
+    upsertLog("export-downloaded", "10:21:12", copy.value.runtime.exportZipDownloaded);
   } catch (error) {
-    upsertLog("export-download-failed", "10:21:12", error instanceof Error ? error.message : "Export download failed");
+    upsertLog("export-download-failed", "10:21:12", localizedOperationError(error, "JOB_DOWNLOAD_FAILED", copy.value.runtime.exportDownloadFailed));
   }
 }
 
 async function saveProjectWithLog(): Promise<boolean> {
   const saved = await projectStore.saveProject();
   if (saved) {
-    upsertLog("project-saved", "10:21:11", "Project saved");
+    upsertLog("project-saved", "10:21:11", copy.value.runtime.projectSaved);
     return true;
   }
-  upsertLog("project-save-failed", "10:21:11", `Project save failed: ${projectStore.saveError ?? "unknown error"}`);
+  upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
   return false;
 }
 
 function logoutUser(): void {
   authStore.logout();
   assetsStore.clearError();
-  upsertLog("auth-signed-out", "10:21:12", "Signed out; local editing remains");
+  upsertLog("auth-signed-out", "10:21:12", copy.value.status.signedOutLocalEditing);
 }
 
 function lastEntryIndex(entries: Array<{ id: string }>, id: string): number {
@@ -1320,10 +1394,6 @@ function findDropContainer(x: number, y: number): RenderedWidget | null {
   ) ?? null;
 }
 
-function toTestId(name: string): string {
-  return name.toLowerCase().replace(/_/g, "-");
-}
-
 function rulerTicks(length: number): number[] {
   const ticks: number[] = [];
   for (let tick = 0; tick <= length; tick += 80) {
@@ -1338,11 +1408,11 @@ function rulerTicks(length: number): number[] {
 function updateLayoutNumber(field: "x" | "y" | "width" | "height", rawValue: string): void {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
-    setInspectorError(field, `${field} must be a number`);
+    setInspectorError(field, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
     return;
   }
   if ((field === "width" || field === "height") && value <= 0) {
-    setInspectorError(field, `${field} must be greater than 0`);
+    setInspectorError(field, copy.value.inspector.errors.greaterThanZero(inspectorFieldLabel(field)));
     return;
   }
   clearInspectorError(field);
@@ -1377,11 +1447,11 @@ function updateFlexGap(rawValue: string): void {
   }
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
-    setInspectorError("gap", "gap must be a number");
+    setInspectorError("gap", copy.value.inspector.errors.number(inspectorFieldLabel("gap")));
     return;
   }
   if (value < 0) {
-    setInspectorError("gap", "gap must be non-negative");
+    setInspectorError("gap", copy.value.inspector.errors.nonNegative(inspectorFieldLabel("gap")));
     return;
   }
   clearInspectorError("gap");
@@ -1436,7 +1506,8 @@ function startMove(widget: WidgetNode, event: MouseEvent): void {
     startX: widget.layout.x,
     startY: widget.layout.y,
     startWidth: widget.layout.width,
-    startHeight: widget.layout.height
+    startHeight: widget.layout.height,
+    startLayout: cloneLayout(widget.layout)
   };
   document.addEventListener("mousemove", handleCanvasMouseMove);
   document.addEventListener("mouseup", endCanvasInteraction);
@@ -1455,7 +1526,8 @@ function startResize(widget: WidgetNode, event: MouseEvent): void {
     startX: widget.layout.x,
     startY: widget.layout.y,
     startWidth: widget.layout.width,
-    startHeight: widget.layout.height
+    startHeight: widget.layout.height,
+    startLayout: cloneLayout(widget.layout)
   };
   document.addEventListener("mousemove", handleCanvasMouseMove);
   document.addEventListener("mouseup", endCanvasInteraction);
@@ -1484,7 +1556,7 @@ function handleCanvasMouseMove(event: MouseEvent): void {
       width: session.startWidth,
       height: session.startHeight
     }, "move");
-    projectStore.updateSelectedLayout({
+    projectStore.updateSelectedLayoutDraft({
       x: nextLayout.x,
       y: nextLayout.y
     });
@@ -1496,7 +1568,7 @@ function handleCanvasMouseMove(event: MouseEvent): void {
     width: Math.max(1, snapCanvasValue(session.startWidth + deltaX)),
     height: Math.max(1, snapCanvasValue(session.startHeight + deltaY))
   }, "resize");
-  projectStore.updateSelectedLayout({
+  projectStore.updateSelectedLayoutDraft({
     width: nextLayout.width,
     height: nextLayout.height
   });
@@ -1593,6 +1665,15 @@ function snapAxis(
 }
 
 function endCanvasInteraction(): void {
+  const session = interaction.value;
+  if (session?.startLayout && (session.mode === "move" || session.mode === "resize")) {
+    const widget = projectStore.selectedWidget?.id === session.widgetId
+      ? projectStore.selectedWidget
+      : null;
+    if (widget) {
+      projectStore.commitSelectedLayoutSnapshot(session.startLayout, cloneLayout(widget.layout), session.mode === "move" ? "Move widget" : "Resize widget");
+    }
+  }
   interaction.value = null;
   alignmentGuides.value = { vertical: [], horizontal: [] };
   document.removeEventListener("mousemove", handleCanvasMouseMove);
@@ -1625,15 +1706,15 @@ function updateStyleText(field: "textColor" | "bgColor" | "borderColor", value: 
 function updateStyleNumber(field: "opacity" | "radius" | "letterSpace" | "lineSpace", rawValue: string): void {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
-    setInspectorError(field, `${field} must be a number`);
+    setInspectorError(field, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
     return;
   }
   if (field === "opacity" && (value < 0 || value > 100)) {
-    setInspectorError(field, "opacity must be between 0 and 100");
+    setInspectorError(field, copy.value.inspector.errors.range(inspectorFieldLabel(field), 0, 100));
     return;
   }
   if (field === "radius" && value < 0) {
-    setInspectorError(field, "radius must be non-negative");
+    setInspectorError(field, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(field)));
     return;
   }
   clearInspectorError(field);
@@ -1654,15 +1735,15 @@ function updatePropNumber(field: string, rawValue: string): void {
   const value = Number(rawValue);
   const errorField = propErrorField(field);
   if (!Number.isFinite(value)) {
-    setInspectorError(errorField, `${field} must be a number`);
+    setInspectorError(errorField, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
     return;
   }
   if ((field === "spinTime" || field === "arcLength" || field === "pointCount") && value <= 0) {
-    setInspectorError(errorField, `${field} must be greater than 0`);
+    setInspectorError(errorField, copy.value.inspector.errors.greaterThanZero(inspectorFieldLabel(field)));
     return;
   }
   if ((field === "selected" || field === "value") && value < 0) {
-    setInspectorError(errorField, `${field} must be non-negative`);
+    setInspectorError(errorField, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(field)));
     return;
   }
   clearInspectorError(errorField);
@@ -1684,13 +1765,13 @@ function updatePropChecked(checked: boolean): void {
 function updateChartValues(rawValue: string): void {
   const trimmed = rawValue.trim();
   if (!trimmed) {
-    setInspectorError("prop-values", "values must contain at least one number");
+    setInspectorError("prop-values", copy.value.inspector.errors.chartValuesRequired);
     return;
   }
   const tokens = trimmed.split(/[\s,]+/).filter(Boolean);
   const values = tokens.map((token) => Number(token));
   if (!values.length || values.some((value) => !Number.isFinite(value))) {
-    setInspectorError("prop-values", "values must be comma, space or newline separated numbers");
+    setInspectorError("prop-values", copy.value.inspector.errors.chartValuesInvalid);
     return;
   }
   clearInspectorError("prop-values");
@@ -1701,11 +1782,11 @@ function updatePaddingSide(side: "top" | "right" | "bottom" | "left", rawValue: 
   const value = Number(rawValue);
   const errorField = `padding-${side}`;
   if (!Number.isFinite(value)) {
-    setInspectorError(errorField, `padding ${side} must be a number`);
+    setInspectorError(errorField, copy.value.inspector.errors.number(inspectorFieldLabel(`padding-${side}`)));
     return;
   }
   if (value < 0) {
-    setInspectorError(errorField, `padding ${side} must be non-negative`);
+    setInspectorError(errorField, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(`padding-${side}`)));
     return;
   }
   clearInspectorError(errorField);
@@ -1735,14 +1816,41 @@ function clearInspectorError(field: string): void {
   inspectorErrors.value = remaining;
 }
 
+function inspectorFieldLabel(field: string): string {
+  const fields = copy.value.inspector.fields;
+  const labels: Record<string, string> = {
+    arcLength: fields.arcLength,
+    dpi: "DPI",
+    gap: fields.gap,
+    height: fields.height,
+    letterSpace: fields.letterSpace,
+    lineSpace: fields.lineSpace,
+    opacity: fields.opacity,
+    "padding-bottom": fields.paddingBottom,
+    "padding-left": fields.paddingLeft,
+    "padding-right": fields.paddingRight,
+    "padding-top": fields.paddingTop,
+    pointCount: fields.pointCount,
+    radius: fields.radius,
+    selected: fields.selected,
+    spinTime: fields.spinTime,
+    value: fields.value,
+    values: fields.values,
+    width: fields.width,
+    x: "X",
+    y: "Y"
+  };
+  return labels[field] ?? field;
+}
+
 function updateTargetNumber(field: "width" | "height" | "dpi", rawValue: string): void {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
-    setInspectorError(`target-${field}`, `${field} must be a number`);
+    setInspectorError(`target-${field}`, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
     return;
   }
   if (value <= 0) {
-    setInspectorError(`target-${field}`, `${field} must be greater than 0`);
+    setInspectorError(`target-${field}`, copy.value.inspector.errors.greaterThanZero(inspectorFieldLabel(field)));
     return;
   }
   clearInspectorError(`target-${field}`);
@@ -1760,7 +1868,7 @@ function updateTargetColorDepth(rawValue: string): void {
 function updateTargetDeviceName(rawValue: string): void {
   const value = rawValue.trim();
   if (!value) {
-    setInspectorError("target-device-name", "deviceName is required");
+    setInspectorError("target-device-name", copy.value.inspector.errors.deviceNameRequired);
     return;
   }
   clearInspectorError("target-device-name");
@@ -1787,20 +1895,31 @@ function generateCodePreview(): string {
   if (!screen) {
     return "";
   }
-  const screenSymbol = lvglSymbol(screen.name);
-  const lines = [`lv_obj_t * ${screenSymbol};`, ``, `void ${screenSymbol}_screen_init(void) {`, `    ${screenSymbol} = lv_obj_create(NULL);`];
+  const missingImageAssetIds = findMissingImageAssetIds(screen.root, project.value.assets);
+  const missingFontAssetIds = findMissingFontAssetIds(screen.root, project.value.assets);
+  if (missingImageAssetIds.length || missingFontAssetIds.length) {
+    return [
+      ...missingImageAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingAsset(assetId)} */`),
+      ...missingFontAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingFontAsset(assetId)} */`)
+    ].join("\n");
+  }
+  const names = createPreviewNameRegistry();
+  const screenSymbol = names.symbol(screen.name);
+  const globals = [`lv_obj_t * ${screenSymbol};`];
+  const lines = [`void ${screenSymbol}_screen_init(void) {`, `    ${screenSymbol} = lv_obj_create(NULL);`];
   appendLayoutPreview(lines, screenSymbol, screen.root.layout);
   appendEventPreview(lines, screenSymbol, screen.root);
   for (const widget of screen.root.children) {
-    appendWidgetPreview(lines, widget, screenSymbol);
+    appendWidgetPreview(globals, lines, names, widget, screenSymbol);
   }
   lines.push("}");
   appendEventCallbackStubs(lines, screen.root);
-  return lines.join("\n");
+  return [...globals, "", ...lines].join("\n");
 }
 
-function appendWidgetPreview(lines: string[], widget: WidgetNode, parentSymbol: string): void {
-  const symbol = lvglSymbol(widget.name);
+function appendWidgetPreview(globals: string[], lines: string[], names: PreviewNameRegistry, widget: WidgetNode, parentSymbol: string): void {
+  const symbol = names.symbol(widget.name);
+  globals.push(`lv_obj_t * ${symbol};`);
   lines.push(`    ${symbol} = ${createCallForPreview(widget, parentSymbol)};`);
   lines.push(`    lv_obj_set_pos(${symbol}, ${widget.layout.x}, ${widget.layout.y});`);
   lines.push(`    lv_obj_set_size(${symbol}, ${widget.layout.width}, ${widget.layout.height});`);
@@ -1809,7 +1928,8 @@ function appendWidgetPreview(lines: string[], widget: WidgetNode, parentSymbol: 
     lines.push(`    lv_label_set_text(${symbol}, ${JSON.stringify(widget.props.text)});`);
   }
   if (widget.type === "button" && typeof widget.props.text === "string") {
-    const labelSymbol = `${symbol}_Label`;
+    const labelSymbol = names.symbol(`${widget.name}_Label`);
+    globals.push(`lv_obj_t * ${labelSymbol};`);
     lines.push(`    ${labelSymbol} = lv_label_create(${symbol});`);
     lines.push(`    lv_label_set_text(${labelSymbol}, ${JSON.stringify(widget.props.text)});`);
     lines.push(`    lv_obj_center(${labelSymbol});`);
@@ -1822,7 +1942,7 @@ function appendWidgetPreview(lines: string[], widget: WidgetNode, parentSymbol: 
     lines.push(`    lv_obj_add_flag(${symbol}, LV_OBJ_FLAG_HIDDEN);`);
   }
   for (const child of widget.children) {
-    appendWidgetPreview(lines, child, symbol);
+    appendWidgetPreview(globals, lines, names, child, symbol);
   }
 }
 
@@ -1845,8 +1965,45 @@ function appendImagePreview(lines: string[], symbol: string, widget: WidgetNode)
     return;
   }
   const asset = project.value.assets.find((item) => item.id === widget.props.assetId);
-  const assetSymbol = asset ? assetSymbolForPreview(asset.name) : assetSymbolForPreview(widget.props.assetId);
+  if (!asset) {
+    return;
+  }
+  const assetSymbol = assetSymbolForPreview(asset.name);
   lines.push(`    lv_img_set_src(${symbol}, &${assetSymbol});`);
+}
+
+function findMissingImageAssetIds(widget: WidgetNode, assets: AssetRef[]): string[] {
+  const assetIds = new Set(assets.map((asset) => asset.id));
+  const missing = new Set<string>();
+  collectMissingImageAssetIds(widget, assetIds, missing);
+  return [...missing];
+}
+
+function findMissingFontAssetIds(widget: WidgetNode, assets: AssetRef[]): string[] {
+  const assetIds = new Set(assets.map((asset) => asset.id));
+  const missing = new Set<string>();
+  collectMissingFontAssetIds(widget, assetIds, missing);
+  return [...missing];
+}
+
+function collectMissingImageAssetIds(widget: WidgetNode, assetIds: Set<string>, missing: Set<string>): void {
+  const assetId = widget.props.assetId;
+  if (widget.type === "image" && typeof assetId === "string" && assetId && !assetIds.has(assetId)) {
+    missing.add(assetId);
+  }
+  for (const child of widget.children) {
+    collectMissingImageAssetIds(child, assetIds, missing);
+  }
+}
+
+function collectMissingFontAssetIds(widget: WidgetNode, assetIds: Set<string>, missing: Set<string>): void {
+  const font = widget.style.font;
+  if (typeof font === "string" && font && !font.startsWith("lv_font_") && !assetIds.has(font)) {
+    missing.add(font);
+  }
+  for (const child of widget.children) {
+    collectMissingFontAssetIds(child, assetIds, missing);
+  }
 }
 
 function appendWidgetPropertyPreview(lines: string[], symbol: string, widget: WidgetNode): void {
@@ -2018,22 +2175,40 @@ function numberProp(widget: WidgetNode, key: string, fallback: number): number {
 
 function chartValuesProp(widget: WidgetNode): number[] {
   const values = widget.props.values;
-  if (Array.isArray(values) && values.length > 0) {
-    return values.filter((value) => Number.isFinite(value));
-  }
   const min = numberProp(widget, "min", 0);
   const max = numberProp(widget, "max", 100);
   const pointCount = Math.max(1, Math.floor(numberProp(widget, "pointCount", 8)));
+  if (Array.isArray(values) && values.length > 0) {
+    const normalized = values
+      .filter((value) => Number.isFinite(value))
+      .slice(0, pointCount)
+      .map((value) => Math.max(min, Math.min(max, value)));
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
   const span = Math.max(0, max - min);
   return Array.from({ length: pointCount }, (_unused, index) => min + ((index * 37 + 20) % (span + 1)));
 }
 
-function lvglSymbol(name: string): string {
-  return `ui_${sanitizeCIdentifier(name)}`;
-}
-
 function assetSymbolForPreview(name: string): string {
   return `ui_img_${sanitizeCIdentifier(name)}`;
+}
+
+type PreviewNameRegistry = {
+  symbol(name: string): string;
+};
+
+function createPreviewNameRegistry(): PreviewNameRegistry {
+  const used: Record<string, number> = {};
+  return {
+    symbol(name: string): string {
+      const base = `ui_${sanitizeCIdentifier(name)}`;
+      const count = used[base] ?? 0;
+      used[base] = count + 1;
+      return count === 0 ? base : `${base}_${count + 1}`;
+    }
+  };
 }
 
 function sanitizeCIdentifier(value: string): string {
@@ -2057,7 +2232,10 @@ function sanitizeCComment(value: string): string {
 }
 
 function cleanHexColorPreview(value: string | undefined): string | null {
-  const color = value?.replace(/^#/, "") ?? "";
+  let color = value?.trim().replace(/^#/, "") ?? "";
+  if (/^[0-9a-fA-F]{3}$/.test(color)) {
+    color = color.split("").map((char) => `${char}${char}`).join("");
+  }
   return /^[0-9a-fA-F]{6}$/.test(color) ? color.toUpperCase() : null;
 }
 
@@ -2078,32 +2256,66 @@ function addSelectedEvent(): void {
 }
 
 async function uploadAsset(file: File): Promise<void> {
+  await uploadAssetAndRegister(file);
+}
+
+async function importReferenceAsset(file: File): Promise<void> {
+  const asset = await uploadAssetAndRegister(file, { allowLocalFallback: true });
+  if (asset?.kind === "image" && selectedWidget.value?.type === "image" && !selectedWidget.value.locked) {
+    projectStore.bindSelectedImageAsset(asset.id);
+    activeInspectorTab.value = "style";
+    appendLog(copy.value.runtime.assetBoundFromPanel, "10:21:11");
+  }
+}
+
+async function uploadAssetAndRegister(file: File, options: { allowLocalFallback?: boolean } = {}): Promise<AssetRef | null> {
   const saved = await saveProjectWithLog();
   if (!saved) {
-    upsertLog("asset-upload-blocked", "10:21:11", "Asset upload stopped because project save failed");
-    return;
+    upsertLog("asset-upload-blocked", "10:21:11", copy.value.runtime.assetUploadSaveFailed);
+    if (options.allowLocalFallback) {
+      return importLocalAssetAndRegister(file);
+    }
+    return null;
   }
   if (isLocalOnlyProject()) {
-    assetsStore.error = "sign in before uploading assets";
-    upsertLog("asset-upload-cloud-required", "10:21:11", "Sign in before uploading assets");
-    return;
+    if (options.allowLocalFallback) {
+      return importLocalAssetAndRegister(file);
+    }
+    assetsStore.error = copy.value.runtime.signInBeforeAssetsError;
+    upsertLog("asset-upload-cloud-required", "10:21:11", copy.value.runtime.signInBeforeAssets);
+    return null;
   }
   const asset = await assetsStore.uploadAsset(project.value.id, file);
   if (asset) {
     projectStore.registerAsset(asset);
-    appendLog(`Asset uploaded: ${asset.name}`, "10:21:11");
+    appendLog(copy.value.runtime.assetUploaded(asset.name), "10:21:11");
+    return asset;
   }
+  if (options.allowLocalFallback) {
+    return importLocalAssetAndRegister(file);
+  }
+  return null;
+}
+
+function importLocalAssetAndRegister(file: File): AssetRef | null {
+  const asset = assetsStore.importLocalAsset(project.value.id, file);
+  if (!asset) {
+    return null;
+  }
+  projectStore.registerAsset(asset);
+  appendLog(copy.value.runtime.assetImportedLocally(asset.name), "10:21:11");
+  return asset;
 }
 
 function bindAssetFromPanel(assetId: string): void {
   const widget = selectedWidget.value;
   if (!widget || widget.type !== "image" || widget.locked) {
-    appendLog("Select an unlocked image widget before binding an asset", "10:21:11");
+    appendLog(copy.value.runtime.selectImageWidgetBeforeBinding, "10:21:11");
     return;
   }
   projectStore.bindSelectedImageAsset(assetId);
   activeInspectorTab.value = "style";
-  appendLog("Image asset bound from Assets panel", "10:21:11");
+  appendLog(copy.value.runtime.assetBoundFromPanel, "10:21:11");
 }
 
 function isLocalOnlyProject(): boolean {
@@ -2149,7 +2361,7 @@ async function deleteAssetNow(assetId: string): Promise<void> {
   const deleted = await assetsStore.deleteAsset(project.value.id, assetId);
   if (deleted) {
     projectStore.unregisterAsset(assetId);
-    appendLog(`Asset deleted: ${assetName}`, "10:21:11");
+    appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
     focusAssetToolbarAfterDelete();
   }
 }
@@ -2168,7 +2380,7 @@ async function deleteReferencedAssetNow(assetId: string): Promise<void> {
     await saveProjectWithLog();
     return;
   }
-  appendLog(`Asset deleted: ${assetName}`, "10:21:11");
+  appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
   focusAssetToolbarAfterDelete();
 }
 
@@ -2302,7 +2514,13 @@ function handleKeydown(event: KeyboardEvent): void {
     const step = event.shiftKey ? 10 : 1;
     const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
     const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
-    projectStore.updateSelectedLayout({ x: widget.layout.x + dx, y: widget.layout.y + dy });
+    if (!keyboardNudge.value || keyboardNudge.value.widgetId !== widget.id) {
+      keyboardNudge.value = {
+        widgetId: widget.id,
+        startLayout: cloneLayout(widget.layout)
+      };
+    }
+    projectStore.updateSelectedLayoutDraft({ x: widget.layout.x + dx, y: widget.layout.y + dy });
     return;
   }
   if (event.key !== "Delete" && event.key !== "Backspace") {
@@ -2364,6 +2582,34 @@ function handleKeyup(event: KeyboardEvent): void {
   if (event.key === " " || event.code === "Space") {
     spacePanActive.value = false;
   }
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+    commitKeyboardNudge();
+  }
+}
+
+function commitKeyboardNudge(): void {
+  const session = keyboardNudge.value;
+  if (!session) {
+    return;
+  }
+  const widget = projectStore.selectedWidget?.id === session.widgetId
+    ? projectStore.selectedWidget
+    : null;
+  if (widget) {
+    projectStore.commitSelectedLayoutSnapshot(session.startLayout, cloneLayout(widget.layout), "Move widget");
+  }
+  keyboardNudge.value = null;
+}
+
+function cloneLayout(layout: LayoutBox): LayoutBox {
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+    align: layout.align,
+    flex: layout.flex ? { ...layout.flex } : undefined
+  };
 }
 
 async function mountSimulator(): Promise<void> {
@@ -2374,45 +2620,63 @@ async function mountSimulator(): Promise<void> {
     return;
   }
   try {
-    simulatorStore.markLoading();
-    simulatorRuntime.value = await loadRuntime({ wasmModuleUrl: simulatorWasmModuleUrl });
+    simulatorStore.markLoading(copy.value.runtime.loadingRuntime);
+    simulatorRuntime.value = await loadRuntime({
+      wasmModuleUrl: simulatorWasmModuleUrl,
+      assetResolver: (asset) => assetsStore.previewUrls[asset.id] ?? null
+    });
+    simulatorStore.setRuntimeKind(simulatorRuntime.value.getRuntimeKind?.() ?? "unknown");
     await simulatorRuntime.value.mount(simulatorCanvas.value);
-    simulatorStore.markReady();
-    upsertLog("simulator-loaded", "10:21:13", "Simulator loaded");
+    simulatorStore.markReady(copy.value.runtime.simulatorLoaded);
+    upsertLog("simulator-loaded", "10:21:13", copy.value.runtime.simulatorLoaded);
     await renderSimulator();
   } catch (error) {
-    const message = simulatorErrorMessage(error, "Runtime load failed");
+    const message = simulatorErrorMessage(error, copy.value.runtime.runtimeLoadFailed);
     simulatorStore.markFailed(message);
     upsertLog("simulator-load-failed", "10:21:13", message);
   }
 }
 
-async function renderSimulator(): Promise<void> {
+async function renderSimulator(): Promise<boolean> {
   if (!simulatorRuntime.value) {
-    return;
+    return false;
   }
   try {
-    simulatorStore.markRendering(activeScreen.value?.name ?? "Screen_1");
+    const screenName = activeScreen.value?.name ?? "Screen_1";
+    simulatorStore.markRendering(screenName, copy.value.runtime.renderScreen(screenName));
     await simulatorRuntime.value.renderProject(projectDocForRuntime(project.value, activeScreen.value?.id ?? null));
-    simulatorStore.markReady("Preview updated");
-    appendSimulatorRenderLog(activeScreen.value?.name ?? "Screen_1");
-    upsertLog("preview-updated", "10:21:13", "Preview updated");
+    simulatorStore.markReady(copy.value.runtime.previewUpdated);
+    appendSimulatorRenderLog(screenName);
+    upsertLog("preview-updated", "10:21:13", copy.value.runtime.previewUpdated);
+    return true;
   } catch (error) {
-    const message = simulatorErrorMessage(error, "Preview failed");
+    const message = simulatorErrorMessage(error, copy.value.runtime.previewFailed);
     simulatorStore.markFailed(message);
     appendLog(message, "10:21:13");
+    return false;
   }
 }
 
 function simulatorErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof SimulatorRuntimeError) {
-    return `${error.code}: ${error.message}`;
+    const summary = localizedErrorForCode(error.code, localeStore.locale, "RUNTIME_LOAD_FAILED");
+    if (localeStore.locale === "en-US" && error.message) {
+      return error.message.startsWith(summary) ? error.message : `${summary}: ${error.message}`;
+    }
+    return summary;
   }
-  return error instanceof Error ? error.message : fallback;
+  return error instanceof Error && localeStore.locale === "en-US" ? error.message : fallback;
 }
 
 function appendSimulatorRenderLog(screenName: string): void {
-  upsertLog("simulator-render", "10:21:13", `Rendering ${screenName}`);
+  upsertLog("simulator-render", "10:21:13", copy.value.runtime.renderScreen(screenName));
+}
+
+function localizedOperationError(error: unknown, fallbackCode: string, fallbackMessage: string): string {
+  if (error instanceof Error && "code" in error) {
+    return localizeError(error, localeStore.locale, fallbackCode);
+  }
+  return localizedErrorForCode(fallbackCode, localeStore.locale) || fallbackMessage;
 }
 
 function appendLog(message: string, time: string, stableKey?: string): void {

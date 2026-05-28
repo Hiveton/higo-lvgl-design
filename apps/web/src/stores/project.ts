@@ -24,6 +24,7 @@ import {
   replaceProjectDocCommand,
   reorderWidget,
   resizeWidget,
+  setWidgetLayoutSnapshot,
   updateWidgetLayout,
   updateWidgetMeta,
   updateWidgetProps,
@@ -39,7 +40,9 @@ import {
   type ProjectSummary
 } from "../api/projects";
 import { getAuthToken, getBrowserStorage } from "../api/auth";
+import { localizedErrorForCode, localizeError } from "../i18n/errors";
 import { useHistoryStore } from "./history";
+import { useLocaleStore } from "./locale";
 import { useSelectionStore } from "./selection";
 
 type DropPoint = {
@@ -67,6 +70,7 @@ const lastProjectKey = "lvgl-editor-last-project-id";
 export const useProjectStore = defineStore("project", () => {
   const selectionStore = useSelectionStore();
   const historyStore = useHistoryStore();
+  const localeStore = useLocaleStore();
   const initialDoc = createWatchDemoProjectDoc();
   historyStore.initialize(initialDoc);
   const currentDoc = ref<ProjectDoc>(historyStore.doc ?? initialDoc);
@@ -129,7 +133,7 @@ export const useProjectStore = defineStore("project", () => {
         width: catalogItem.defaultSize.width,
         height: catalogItem.defaultSize.height
       },
-      props: defaultPropsFor(type),
+      props: defaultPropsFor(type, localeStore.locale),
       style: {},
       locked: false,
       hidden: false
@@ -240,6 +244,7 @@ export const useProjectStore = defineStore("project", () => {
     return replaceProjectDocCommand({
       id: `add-${widget.id}`,
       label: `Add ${widget.name}`,
+      message: { key: "addWidget", widgetType: widget.type },
       update(doc) {
         return {
           ...doc,
@@ -281,6 +286,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `register-asset-${asset.id}`,
       label: "Register asset",
+      message: { key: "registerAsset" },
       update(doc) {
         return {
           ...doc,
@@ -294,6 +300,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `unregister-asset-${assetId}`,
       label: "Unregister asset",
+      message: { key: "unregisterAsset" },
       update(doc) {
         return {
           ...doc,
@@ -358,6 +365,24 @@ export const useProjectStore = defineStore("project", () => {
         })
       );
     }
+  }
+
+  function updateSelectedLayoutDraft(layout: Partial<WidgetNode["layout"]>): void {
+    const widget = selectedWidget.value;
+    if (!widget || widget.locked) {
+      return;
+    }
+    currentDoc.value = updateWidgetLayout({ widgetId: widget.id, layout }).apply(currentDoc.value);
+    dirty.value = true;
+    normalizeActiveRefs();
+  }
+
+  function commitSelectedLayoutSnapshot(before: WidgetNode["layout"], after: WidgetNode["layout"], label?: string): void {
+    const widget = selectedWidget.value;
+    if (!widget || widget.locked || sameLayout(before, after)) {
+      return;
+    }
+    execute(setWidgetLayoutSnapshot({ widgetId: widget.id, before, after, label }));
   }
 
   function updateSelectedLayoutMeta(layout: Pick<WidgetNode["layout"], "align" | "flex">): void {
@@ -449,6 +474,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: "update-target",
       label: "Update target",
+      message: { key: "updateTarget" },
       update(doc) {
         const nextTarget = {
           ...doc.target,
@@ -481,6 +507,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: "rename-project",
       label: "Rename project",
+      message: { key: "renameProject" },
       update(doc) {
         return {
           ...doc,
@@ -498,6 +525,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `rename-screen-${screenId}`,
       label: "Rename screen",
+      message: { key: "renameScreen" },
       update(doc) {
         return {
           ...doc,
@@ -522,6 +550,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: "update-theme",
       label: "Update theme",
+      message: { key: "updateTheme" },
       update(doc) {
         return {
           ...doc,
@@ -539,6 +568,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `add-screen-${id}`,
       label: "Add screen",
+      message: { key: "addScreen" },
       update(doc) {
         return {
           ...doc,
@@ -608,6 +638,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `duplicate-screen-${screenId}`,
       label: "Duplicate screen",
+      message: { key: "duplicateScreen" },
       update(doc) {
         return {
           ...doc,
@@ -650,6 +681,7 @@ export const useProjectStore = defineStore("project", () => {
     execute(replaceProjectDocCommand({
       id: `delete-screen-${screenId}`,
       label: "Delete screen",
+      message: { key: "deleteScreen" },
       update(doc) {
         return {
           ...doc,
@@ -718,7 +750,9 @@ export const useProjectStore = defineStore("project", () => {
     validationErrors.value = validation.errors;
     if (!validation.valid) {
       saveState.value = "failed";
-      saveError.value = validation.errors[0]?.message ?? "Project validation failed";
+      const summary = localizedErrorForCode("INVALID_PROJECT_DOC", localeStore.locale);
+      const detail = validation.errors[0]?.message;
+      saveError.value = localeStore.locale === "en-US" && detail ? `${summary}: ${detail}` : summary;
       return false;
     }
     if (shouldKeepProjectLocal()) {
@@ -746,7 +780,7 @@ export const useProjectStore = defineStore("project", () => {
         return createAndSaveCurrentProject();
       }
       saveState.value = "failed";
-      saveError.value = caught instanceof Error ? caught.message : "Project save failed";
+      saveError.value = localizeError(caught, localeStore.locale, "PROJECT_SAVE_FAILED");
       return false;
     }
   }
@@ -779,7 +813,7 @@ export const useProjectStore = defineStore("project", () => {
       return true;
     } catch (caught) {
       saveState.value = "failed";
-      saveError.value = caught instanceof Error ? caught.message : "Project save failed";
+      saveError.value = localizeError(caught, localeStore.locale, "PROJECT_SAVE_FAILED");
       return false;
     }
   }
@@ -881,6 +915,8 @@ export const useProjectStore = defineStore("project", () => {
     moveSelectedWidget,
     resizeSelectedWidget,
     updateSelectedLayout,
+    updateSelectedLayoutDraft,
+    commitSelectedLayoutSnapshot,
     updateSelectedLayoutMeta,
     deleteSelectedWidget,
     toggleWidgetLocked,
@@ -1150,15 +1186,15 @@ function numericSuffix(value: string, pattern: RegExp): number {
   return Number.isInteger(index) && index > 0 ? index : 0;
 }
 
-function defaultPropsFor(type: Exclude<WidgetType, "screen">): Record<string, WidgetPropValue> {
+function defaultPropsFor(type: Exclude<WidgetType, "screen">, locale: "en-US" | "zh-CN" = "en-US"): Record<string, WidgetPropValue> {
   if (type === "label") {
-    return { text: "Label" };
+    return { text: locale === "zh-CN" ? "文本" : "Label" };
   }
   if (type === "button") {
-    return { text: "Button" };
+    return { text: locale === "zh-CN" ? "按钮" : "Button" };
   }
   if (type === "checkbox") {
-    return { text: "Checkbox", checked: false };
+    return { text: locale === "zh-CN" ? "复选框" : "Checkbox", checked: false };
   }
   if (type === "switch") {
     return { checked: false };
@@ -1167,7 +1203,7 @@ function defaultPropsFor(type: Exclude<WidgetType, "screen">): Record<string, Wi
     return { min: 0, max: 100, value: 0 };
   }
   if (type === "dropdown") {
-    return { options: "Option 1\nOption 2", selected: 0 };
+    return { options: locale === "zh-CN" ? "选项 1\n选项 2" : "Option 1\nOption 2", selected: 0 };
   }
   if (type === "spinner") {
     return { spinTime: 1000, arcLength: 60 };
@@ -1259,4 +1295,8 @@ function clearAssetReference(widget: WidgetNode, assetId: string): WidgetNode {
     style: nextStyle,
     children: widget.children.map((child) => clearAssetReference(child, assetId))
   };
+}
+
+function sameLayout(left: WidgetNode["layout"], right: WidgetNode["layout"]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

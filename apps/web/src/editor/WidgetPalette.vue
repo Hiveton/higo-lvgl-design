@@ -1,26 +1,26 @@
 <template>
   <aside class="widgets-panel panel">
-    <div class="panel-title">Widgets</div>
+    <div class="panel-title">{{ copy.widgets.title }}</div>
     <input
       ref="widgetSearchInputRef"
       v-model="widgetSearch"
       class="panel-search"
       data-testid="widget-search-input"
-      aria-label="Search widgets"
-      title="Search widgets"
-      placeholder="Search widgets..."
+      :aria-label="copy.widgets.search"
+      :title="copy.widgets.search"
+      :placeholder="copy.widgets.searchPlaceholder"
     />
     <div class="widget-search-meta">
       <span data-testid="widget-result-count" role="status" aria-live="polite" aria-atomic="true">{{ widgetResultCountLabel }}</span>
-      <button v-if="widgetSearch" class="mini-action" type="button" data-testid="clear-widget-search-button" aria-label="Clear widget search" title="Clear widget search" @click="clearWidgetSearch">
+      <button v-if="widgetSearch" class="mini-action" type="button" data-testid="clear-widget-search-button" :aria-label="copy.widgets.clearSearch" :title="copy.widgets.clearSearch" @click="clearWidgetSearch">
         <IconGlyph name="close" />
       </button>
     </div>
     <div v-if="widgetGroups.length === 0" class="widget-empty-state" data-testid="widget-empty-state" role="status" aria-live="polite" aria-atomic="true">
-      No widgets match "{{ widgetSearch.trim() }}".
+      {{ copy.widgets.emptySearch(widgetSearch.trim()) }}
     </div>
     <section v-for="group in widgetGroups" :key="group.category" class="widget-category">
-      <h2>{{ group.category }}</h2>
+      <h2>{{ group.label }}</h2>
       <div class="widget-grid">
         <button
           v-for="widget in group.widgets"
@@ -28,14 +28,14 @@
           class="widget-card"
           type="button"
           draggable="true"
-          :aria-label="`Add ${widget.label} widget`"
-          :title="`Add ${widget.label} widget`"
+          :aria-label="copy.widgets.addWidget(widget.displayLabel)"
+          :title="copy.widgets.addWidget(widget.displayLabel)"
           :data-testid="`widget-card-${widget.type}`"
           @dragstart="startWidgetDrag(widget.type, $event)"
           @click="$emit('add-widget', widget.type)"
         >
           <IconGlyph :name="widgetIcon(widget.type)" />
-          <span>{{ widget.label }}</span>
+          <span>{{ widget.displayLabel }}</span>
         </button>
       </div>
     </section>
@@ -45,6 +45,7 @@
 <script setup lang="ts">
 import type { WidgetCatalogItem, WidgetType } from "@hiveton-lvgl/schema";
 import { computed, ref } from "vue";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
 
 const props = defineProps<{
@@ -57,12 +58,14 @@ defineEmits<{
 
 const widgetSearch = ref("");
 const widgetSearchInputRef = ref<HTMLInputElement | null>(null);
+const copy = useCopy();
 
 const widgetGroups = computed(() =>
   ["Basic", "Containers", "Charts", "Indicators", "Inputs", "Advanced"].map((category) => {
     const search = widgetSearch.value.trim().toLowerCase();
     return {
       category,
+      label: copy.value.widgets.categories[category as keyof typeof copy.value.widgets.categories],
       widgets: props.catalog.filter((widget) => {
         if (widget.category !== category) {
           return false;
@@ -70,8 +73,11 @@ const widgetGroups = computed(() =>
         if (!search) {
           return true;
         }
-        return `${widget.label} ${widget.type} ${widget.category}`.toLowerCase().includes(search);
-      })
+        return `${widgetDisplayLabel(widget)} ${widget.label} ${widget.type} ${widget.category}`.toLowerCase().includes(search);
+      }).map((widget) => ({
+        ...widget,
+        displayLabel: widgetDisplayLabel(widget)
+      }))
     };
   }).filter((group) => group.widgets.length > 0)
 );
@@ -79,7 +85,7 @@ const widgetResultCount = computed(() =>
   widgetGroups.value.reduce((count, group) => count + group.widgets.length, 0)
 );
 const widgetResultCountLabel = computed(() =>
-  `${widgetResultCount.value} ${widgetResultCount.value === 1 ? "widget" : "widgets"}`
+  copy.value.widgets.resultCount(widgetResultCount.value)
 );
 
 function startWidgetDrag(type: Exclude<WidgetType, "screen">, event: DragEvent): void {
@@ -90,6 +96,10 @@ function startWidgetDrag(type: Exclude<WidgetType, "screen">, event: DragEvent):
 function clearWidgetSearch(): void {
   widgetSearch.value = "";
   widgetSearchInputRef.value?.focus();
+}
+
+function widgetDisplayLabel(widget: WidgetCatalogItem): string {
+  return copy.value.widgets.names[widget.type] ?? widget.label;
 }
 
 function widgetIcon(type: Exclude<WidgetType, "screen">): InstanceType<typeof IconGlyph>["$props"]["name"] {

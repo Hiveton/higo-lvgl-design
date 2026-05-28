@@ -2,25 +2,25 @@
   <div class="assets-panel panel">
     <div class="panel-title small asset-panel-title">
       <IconGlyph name="image" />
-      <span>Resources</span>
+      <span>{{ copy.assets.title }}</span>
     </div>
-    <div class="asset-tabs" role="tablist" aria-label="Resource categories">
-      <button ref="assetsTabRef" class="tab" :class="{ active: activeTab === 'assets' }" data-testid="asset-assets-tab" type="button" role="tab" aria-label="Show asset resources" title="Show asset resources" :aria-selected="activeTab === 'assets' ? 'true' : 'false'" :tabindex="activeTab === 'assets' ? 0 : -1" @click="activeTab = 'assets'" @keydown="handleAssetTabKeydown($event, 'assets')">Assets</button>
-      <button ref="fontsTabRef" class="tab" :class="{ active: activeTab === 'fonts' }" data-testid="asset-fonts-tab" type="button" role="tab" aria-label="Show font resources" title="Show font resources" :aria-selected="activeTab === 'fonts' ? 'true' : 'false'" :tabindex="activeTab === 'fonts' ? 0 : -1" @click="activeTab = 'fonts'" @keydown="handleAssetTabKeydown($event, 'fonts')">Fonts</button>
+    <div class="asset-tabs" role="tablist" :aria-label="copy.assets.resourceCategories">
+      <button ref="assetsTabRef" class="tab" :class="{ active: activeTab === 'assets' }" data-testid="asset-assets-tab" type="button" role="tab" :aria-label="copy.assets.showAssets" :title="copy.assets.showAssets" :aria-selected="activeTab === 'assets' ? 'true' : 'false'" :tabindex="activeTab === 'assets' ? 0 : -1" @click="activeTab = 'assets'" @keydown="handleAssetTabKeydown($event, 'assets')">{{ copy.assets.assetsTab }}</button>
+      <button ref="fontsTabRef" class="tab" :class="{ active: activeTab === 'fonts' }" data-testid="asset-fonts-tab" type="button" role="tab" :aria-label="copy.assets.showFonts" :title="copy.assets.showFonts" :aria-selected="activeTab === 'fonts' ? 'true' : 'false'" :tabindex="activeTab === 'fonts' ? 0 : -1" @click="activeTab = 'fonts'" @keydown="handleAssetTabKeydown($event, 'fonts')">{{ copy.assets.fontsTab }}</button>
     </div>
     <div class="asset-controls">
-      <select v-model="assetKindFilter" class="select-like asset-filter" data-testid="asset-kind-filter" aria-label="Asset filter" title="Asset filter">
-        <option value="all">All Assets</option>
-        <option value="image">Images</option>
-        <option value="font">Fonts</option>
+      <select v-model="assetKindFilter" class="select-like asset-filter" data-testid="asset-kind-filter" :aria-label="copy.assets.assetFilter" :title="copy.assets.assetFilter">
+        <option value="all">{{ copy.assets.allAssets }}</option>
+        <option value="image">{{ copy.assets.images }}</option>
+        <option value="font">{{ copy.assets.fonts }}</option>
       </select>
       <span class="asset-view-actions">
         <button class="mini-action" :class="{ active: viewMode === 'list' }" data-testid="asset-list-view-button" :aria-label="listViewLabel" :title="listViewLabel" type="button" :aria-pressed="viewMode === 'list' ? 'true' : 'false'" @click="viewMode = 'list'"><IconGlyph name="bar" /></button>
         <button class="mini-action" :class="{ active: viewMode === 'grid' }" data-testid="asset-grid-view-button" :aria-label="gridViewLabel" :title="gridViewLabel" type="button" :aria-pressed="viewMode === 'grid' ? 'true' : 'false'" @click="viewMode = 'grid'"><IconGlyph name="grid" /></button>
         <label
           class="mini-action import-label"
-          aria-label="Import asset"
-          title="Import asset"
+          :aria-label="copy.assets.importAsset"
+          :title="copy.assets.importAsset"
           data-testid="asset-import-control"
           role="button"
           tabindex="0"
@@ -38,21 +38,21 @@
       v-model="assetQuery"
       class="panel-search asset-search"
       data-testid="asset-search-input"
-      aria-label="Filter resources"
-      title="Filter resources"
-      placeholder="Filter assets..."
+      :aria-label="copy.assets.filterResources"
+      :title="copy.assets.filterResources"
+      :placeholder="copy.assets.filterPlaceholder"
     />
     <div class="asset-search-meta">
       <span data-testid="asset-result-count" role="status" aria-live="polite" aria-atomic="true">{{ resourceCountLabel }}</span>
-      <button v-if="assetQuery" class="mini-action" type="button" data-testid="clear-asset-search-button" aria-label="Clear asset search" title="Clear asset search" @click="clearAssetSearch">
+      <button v-if="assetQuery" class="mini-action" type="button" data-testid="clear-asset-search-button" :aria-label="copy.assets.clearSearch" :title="copy.assets.clearSearch" @click="clearAssetSearch">
         <IconGlyph name="close" />
       </button>
     </div>
     <div v-if="showListHeader" class="asset-list-header" data-testid="asset-list-header">
-      <span>Name</span>
-      <span>Type</span>
-      <span>Size</span>
-      <span>Use</span>
+      <span>{{ copy.assets.columns.name }}</span>
+      <span>{{ copy.assets.columns.type }}</span>
+      <span>{{ copy.assets.columns.size }}</span>
+      <span>{{ copy.assets.columns.use }}</span>
     </div>
     <div v-if="assets.length === 0 && filteredSampleAssets.length > 0" class="asset-grid asset-grid-samples" :class="{ 'asset-list': viewMode === 'list' }" data-testid="assets-empty-state">
       <div
@@ -76,14 +76,14 @@
         <strong data-asset-cell="name">{{ sample.name }}</strong>
         <span class="asset-kind" data-asset-cell="type">{{ assetTypeLabel(sample.assetKind) }}</span>
         <span class="asset-size" data-asset-cell="size">{{ sampleSizeLabel(sample) }}</span>
-        <span class="asset-usage" data-asset-cell="usage">Reference</span>
+        <span class="asset-usage" data-asset-cell="usage">{{ copy.assets.reference }}</span>
       </div>
     </div>
     <div v-else-if="assets.length === 0" class="asset-empty" data-testid="assets-empty-state" role="status" aria-live="polite" aria-atomic="true">
-      No matching resources
+      {{ copy.assets.emptyResources }}
     </div>
     <div v-else-if="filteredAssets.length === 0" class="asset-empty" data-testid="assets-empty-state" role="status" aria-live="polite" aria-atomic="true">
-      No matching assets
+      {{ copy.assets.emptyAssets }}
     </div>
     <div v-else class="asset-grid" :class="{ 'asset-list': viewMode === 'list' }" data-testid="asset-results">
       <div
@@ -116,11 +116,11 @@
     </div>
     <div v-if="selectedAsset || visibleSelectedSampleAsset" class="asset-selection-bar" data-testid="asset-selection-bar" role="status" aria-live="polite" aria-atomic="true">
       <div>
-        <span class="panel-kicker">{{ selectedAsset ? "Selected Resource" : "Reference Resource" }}</span>
+        <span class="panel-kicker">{{ selectedAsset ? copy.assets.selectedResource : copy.assets.referenceResource }}</span>
         <strong>{{ selectedAsset?.name ?? visibleSelectedSampleAsset?.name }}</strong>
       </div>
       <span v-if="selectedAsset">{{ assetSummary(selectedAsset) }} · {{ usageLabel(selectedAsset.id) }}</span>
-      <span v-else>{{ visibleSelectedSampleAsset?.meta }} · Import to bind</span>
+      <span v-else>{{ visibleSelectedSampleAsset ? sampleMetaLabel(visibleSelectedSampleAsset) : "" }} · {{ copy.assets.importToBind }}</span>
       <span v-if="showBindHint" class="asset-bind-hint" data-testid="asset-bind-hint" role="status" aria-live="polite" aria-atomic="true">{{ bindHint }}</span>
       <button
         v-if="selectedAsset?.kind === 'image'"
@@ -133,7 +133,18 @@
         :title="bindButtonTitle"
         @click="$emit('bind-image-asset', selectedAsset.id)"
       >
-        Bind to Image
+        {{ copy.assets.bindButton }}
+      </button>
+      <button
+        v-else-if="visibleSelectedSampleAsset?.assetKind === 'image'"
+        class="select-like"
+        type="button"
+        data-testid="import-selected-reference-button"
+        :aria-label="copy.assets.importReference(visibleSelectedSampleAsset.name)"
+        :title="copy.assets.importReference(visibleSelectedSampleAsset.name)"
+        @click="importSampleAsset(visibleSelectedSampleAsset)"
+      >
+        {{ copy.assets.importReferenceButton }}
       </button>
     </div>
     <p v-if="error" id="asset-error" class="asset-error" role="alert">{{ error }}</p>
@@ -143,6 +154,7 @@
 <script setup lang="ts">
 import type { AssetRef, WidgetNode } from "@hiveton-lvgl/schema";
 import { computed, ref } from "vue";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
 
 const props = defineProps<{
@@ -157,6 +169,7 @@ const emit = defineEmits<{
   upload: [file: File];
   "delete-asset": [assetId: string];
   "bind-image-asset": [assetId: string];
+  "import-reference-asset": [file: File];
 }>();
 
 const assetQuery = ref("");
@@ -172,11 +185,12 @@ const assetKindFilter = ref<"all" | AssetRef["kind"]>("all");
 const viewMode = ref<"grid" | "list">("list");
 const selectedAssetId = ref<string | null>(null);
 const selectedSampleAsset = ref<SampleAsset | null>(null);
+const copy = useCopy();
 const listViewLabel = computed(() =>
-  viewMode.value === "list" ? "Resources are shown as a list" : "Show resources as a list"
+  viewMode.value === "list" ? copy.value.assets.listActive : copy.value.assets.listView
 );
 const gridViewLabel = computed(() =>
-  viewMode.value === "grid" ? "Resources are shown as a grid" : "Show resources as a grid"
+  viewMode.value === "grid" ? copy.value.assets.gridActive : copy.value.assets.gridView
 );
 
 function handleAssetTabKeydown(event: KeyboardEvent, tab: AssetTab): void {
@@ -225,7 +239,7 @@ const displayedResourceCount = computed(() =>
   props.assets.length === 0 ? filteredSampleAssets.value.length : filteredAssets.value.length
 );
 const resourceCountLabel = computed(() =>
-  `${displayedResourceCount.value} ${displayedResourceCount.value === 1 ? "resource" : "resources"}`
+  copy.value.assets.resourceCount(displayedResourceCount.value)
 );
 const showListHeader = computed(() =>
   viewMode.value === "list" &&
@@ -241,12 +255,12 @@ const canBindSelectedImage = computed(() =>
 const showBindHint = computed(() =>
   Boolean(selectedAsset.value?.kind === "image" && !canBindSelectedImage.value)
 );
-const bindHint = "Select an unlocked image widget to bind this resource.";
+const bindHint = computed(() => copy.value.assets.bindHint);
 const bindButtonLabel = computed(() =>
-  selectedAsset.value ? `Bind ${selectedAsset.value.name} to selected image widget` : "Bind selected resource to selected image widget"
+  selectedAsset.value ? copy.value.assets.bindImage(selectedAsset.value.name) : copy.value.assets.bindSelectedImage
 );
 const bindButtonTitle = computed(() =>
-  canBindSelectedImage.value ? bindButtonLabel.value : bindHint
+  canBindSelectedImage.value ? bindButtonLabel.value : bindHint.value
 );
 
 type SampleAsset = {
@@ -254,25 +268,25 @@ type SampleAsset = {
   assetKind: AssetRef["kind"];
   kind: string;
   glyph: string;
-  meta: string;
+  detail: string;
 };
 
 const sampleAssets = [
-  { name: "bg.png", assetKind: "image", kind: "bg", glyph: "", meta: "image 120x120" },
-  { name: "heart.png", assetKind: "image", kind: "heart", glyph: "♥", meta: "image 64x64" },
-  { name: "icon_battery.png", assetKind: "image", kind: "battery", glyph: "▰", meta: "image 64x32" },
-  { name: "icon_bt.png", assetKind: "image", kind: "bt", glyph: "⌁", meta: "image 64x64" },
-  { name: "icon_location.png", assetKind: "image", kind: "location", glyph: "●", meta: "image 64x64" },
-  { name: "icon_shoe.png", assetKind: "image", kind: "shoe", glyph: "◒", meta: "image 64x64" },
-  { name: "icon_flame.png", assetKind: "image", kind: "flame", glyph: "▲", meta: "image 64x64" },
-  { name: "logo.png", assetKind: "image", kind: "logo", glyph: "", meta: "image 128x128" }
+  { name: "bg.png", assetKind: "image", kind: "bg", glyph: "", detail: "120x120" },
+  { name: "heart.png", assetKind: "image", kind: "heart", glyph: "♥", detail: "64x64" },
+  { name: "icon_battery.png", assetKind: "image", kind: "battery", glyph: "▰", detail: "64x32" },
+  { name: "icon_bt.png", assetKind: "image", kind: "bt", glyph: "⌁", detail: "64x64" },
+  { name: "icon_location.png", assetKind: "image", kind: "location", glyph: "●", detail: "64x64" },
+  { name: "icon_shoe.png", assetKind: "image", kind: "shoe", glyph: "◒", detail: "64x64" },
+  { name: "icon_flame.png", assetKind: "image", kind: "flame", glyph: "▲", detail: "64x64" },
+  { name: "logo.png", assetKind: "image", kind: "logo", glyph: "", detail: "128x128" }
 ] satisfies SampleAsset[];
 
 const sampleFonts = [
-  { name: "lv_font_montserrat_14", assetKind: "font", kind: "font", glyph: "Aa", meta: "font 14px" },
-  { name: "lv_font_montserrat_20", assetKind: "font", kind: "font", glyph: "Aa", meta: "font 20px" },
-  { name: "lv_font_montserrat_32", assetKind: "font", kind: "font", glyph: "Aa", meta: "font 32px" },
-  { name: "lv_font_montserrat_48", assetKind: "font", kind: "font", glyph: "Aa", meta: "font 48px" }
+  { name: "lv_font_montserrat_14", assetKind: "font", kind: "font", glyph: "Aa", detail: "14px" },
+  { name: "lv_font_montserrat_20", assetKind: "font", kind: "font", glyph: "Aa", detail: "20px" },
+  { name: "lv_font_montserrat_32", assetKind: "font", kind: "font", glyph: "Aa", detail: "32px" },
+  { name: "lv_font_montserrat_48", assetKind: "font", kind: "font", glyph: "Aa", detail: "48px" }
  ] satisfies SampleAsset[];
 
 const visibleSampleAssets = computed(() => {
@@ -286,7 +300,7 @@ const filteredSampleAssets = computed(() => {
   const query = assetQuery.value.trim().toLowerCase();
   return visibleSampleAssets.value.filter((sample) =>
     !query ||
-    [sample.name, sample.kind, sample.meta]
+    [sample.name, sample.kind, sampleMetaLabel(sample)]
       .some((value) => value.toLowerCase().includes(query))
   );
 });
@@ -317,23 +331,27 @@ function assetSummary(asset: AssetRef): string {
 }
 
 function assetTypeLabel(kind: AssetRef["kind"]): string {
-  return kind === "font" ? "Font" : "Image";
+  return kind === "font" ? copy.value.assets.typeFont : copy.value.assets.typeImage;
 }
 
 function sampleSizeLabel(asset: SampleAsset): string {
-  return asset.meta.replace(`${asset.assetKind} `, "");
+  return asset.detail;
 }
 
 function sampleAssetLabel(asset: SampleAsset): string {
-  return `Select reference resource ${asset.name}, ${assetTypeLabel(asset.assetKind)}, ${asset.meta}`;
+  return copy.value.assets.selectReference(asset.name, assetTypeLabel(asset.assetKind), sampleMetaLabel(asset));
+}
+
+function sampleMetaLabel(asset: SampleAsset): string {
+  return copy.value.assets.sampleMeta(assetTypeLabel(asset.assetKind), asset.detail);
 }
 
 function assetCardLabel(asset: AssetRef): string {
-  return `Select resource ${asset.name}, ${assetTypeLabel(asset.kind)}, ${assetSummary(asset).replace(" · ", ", ")}, ${usageLabel(asset.id)}`;
+  return copy.value.assets.selectResource(asset.name, assetTypeLabel(asset.kind), assetSummary(asset).replace(" · ", ", "), usageLabel(asset.id));
 }
 
 function deleteAssetLabel(asset: AssetRef): string {
-  return `Delete ${asset.name} resource`;
+  return copy.value.assets.deleteAsset(asset.name);
 }
 
 function selectAsset(asset: AssetRef): void {
@@ -346,12 +364,31 @@ function selectSampleAsset(asset: SampleAsset): void {
   selectedSampleAsset.value = asset;
 }
 
+function importSampleAsset(asset: SampleAsset): void {
+  if (asset.assetKind !== "image") {
+    return;
+  }
+  const bytes = samplePngBytes();
+  const content = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(content).set(bytes);
+  emit("import-reference-asset", new File([content], asset.name, { type: "image/png" }));
+}
+
 function sampleTestId(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function usageLabel(assetId: string): string {
   const count = props.usageCounts[assetId] ?? 0;
-  return count === 0 ? "Unused" : `Used ${count}`;
+  return count === 0 ? copy.value.assets.unused : copy.value.assets.used(count);
+}
+
+function samplePngBytes(): Uint8Array {
+  const binary = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lm2YpAAAAABJRU5ErkJggg==");
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 </script>

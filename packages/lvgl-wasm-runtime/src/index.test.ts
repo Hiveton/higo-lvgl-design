@@ -1,8 +1,13 @@
 import { createDefaultProjectDoc } from "@hiveton-lvgl/schema";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLvglWasmRuntime, loadRuntime, SimulatorRuntimeError } from "./index";
 
 describe("lvgl wasm runtime wrapper", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("mounts a canvas and renders the active project screen", async () => {
     const runtime = await loadRuntime();
     const canvas = document.createElement("canvas");
@@ -17,6 +22,7 @@ describe("lvgl wasm runtime wrapper", () => {
 
     expect(canvas.width).toBe(480);
     expect(canvas.height).toBe(480);
+    expect(runtime.getRuntimeKind?.()).toBe("canvas");
     expect(runtime.getLastRenderedScreenName()).toBe("Screen_1");
     expect(canvas.dataset.lvglScreen).toBe("Screen_1");
   });
@@ -83,6 +89,7 @@ describe("lvgl wasm runtime wrapper", () => {
     expect(bridge.init).toHaveBeenCalledWith(canvas);
     expect(bridge.resize).toHaveBeenCalledWith(320, 240);
     expect(renderProjectJson).toHaveBeenCalledWith(JSON.stringify(doc));
+    expect(runtime.getRuntimeKind?.()).toBe("wasm");
     expect(canvas.dataset.lvglScreen).toBe("Screen_1");
     expect(runtime.getLastRenderedScreenName()).toBe("Screen_1");
     runtime.destroy();
@@ -216,6 +223,73 @@ describe("lvgl wasm runtime wrapper", () => {
       code: "MISSING_ASSET",
       message: "Missing asset: missing-asset"
     });
+  });
+
+  it("draws image assets in the canvas fallback when an asset resolver provides a source", async () => {
+    const drawImage = vi.fn();
+    const context = {
+      beginPath: vi.fn(),
+      drawImage,
+      fill: vi.fn(),
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      lineTo: vi.fn(),
+      moveTo: vi.fn(),
+      quadraticCurveTo: vi.fn(),
+      restore: vi.fn(),
+      save: vi.fn(),
+      stroke: vi.fn()
+    } as unknown as CanvasRenderingContext2D;
+    class TestImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      crossOrigin = "";
+      set src(_source: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("navigator", { userAgent: "Chrome" });
+    vi.stubGlobal("Image", TestImage);
+
+    const runtime = await loadRuntime({
+      assetResolver: (asset) => asset.id === "asset-logo" ? "data:image/png;base64,logo" : null
+    });
+    const canvas = document.createElement("canvas");
+    vi.spyOn(canvas, "getContext").mockReturnValue(context);
+    const doc = createDefaultProjectDoc({
+      id: "project-1",
+      name: "Image UI",
+      updatedAt: "2026-05-08T00:00:00Z"
+    });
+    doc.assets = [{
+      id: "asset-logo",
+      projectId: doc.id,
+      name: "logo.png",
+      kind: "image",
+      mimeType: "image/png",
+      width: 16,
+      height: 16,
+      sizeBytes: 64,
+      objectKey: "local://logo.png",
+      createdAt: "2026-05-08T00:00:00Z"
+    }];
+    doc.screens[0].root.children = [{
+      id: "image-1",
+      type: "image",
+      name: "Logo_Image",
+      parentId: "root-screen-1",
+      children: [],
+      layout: { x: 8, y: 12, width: 32, height: 24 },
+      props: { assetId: "asset-logo" },
+      style: {},
+      locked: false,
+      hidden: false
+    }];
+
+    await runtime.mount(canvas);
+    await runtime.renderProject(doc);
+
+    expect(drawImage).toHaveBeenCalledWith(expect.any(TestImage), 8, 12, 32, 24);
   });
 
   it("rejects unsupported widget types with a stable simulator error code", async () => {

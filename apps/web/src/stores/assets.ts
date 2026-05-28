@@ -2,6 +2,8 @@ import type { AssetRef } from "@hiveton-lvgl/schema";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { deleteProjectAsset, getProjectAssetContent, listProjectAssets, uploadProjectAsset } from "../api/assets";
+import { localizedErrorForCode, localizeError } from "../i18n/errors";
+import { useLocaleStore } from "./locale";
 
 const MAX_ASSET_BYTES = 5 * 1024 * 1024;
 const SUPPORTED_ASSET_MIME_TYPES = new Set([
@@ -19,6 +21,7 @@ const SUPPORTED_ASSET_MIME_TYPES = new Set([
 ]);
 
 export const useAssetsStore = defineStore("assets", () => {
+  const localeStore = useLocaleStore();
   const assets = ref<AssetRef[]>([]);
   const previewUrls = ref<Record<string, string>>({});
   const loading = ref(false);
@@ -31,7 +34,7 @@ export const useAssetsStore = defineStore("assets", () => {
       assets.value = await listProjectAssets(projectId);
       await hydratePreviewUrls(projectId, assets.value);
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "asset list failed";
+      error.value = localizeError(caught, localeStore.locale, "ASSET_LIST_FAILED");
     } finally {
       loading.value = false;
     }
@@ -67,12 +70,12 @@ export const useAssetsStore = defineStore("assets", () => {
     loading.value = true;
     error.value = null;
     if (file.size > MAX_ASSET_BYTES) {
-      error.value = "asset file is too large";
+      error.value = localizedErrorForCode("ASSET_TOO_LARGE", localeStore.locale);
       loading.value = false;
       return null;
     }
     if (!isSupportedAssetFile(file)) {
-      error.value = "only PNG, JPG, TTF, OTF, WOFF and WOFF2 assets are supported";
+      error.value = localizedErrorForCode("UNSUPPORTED_ASSET_TYPE", localeStore.locale);
       loading.value = false;
       return null;
     }
@@ -87,11 +90,42 @@ export const useAssetsStore = defineStore("assets", () => {
       }
       return asset;
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "asset upload failed";
+      error.value = localizeError(caught, localeStore.locale, "ASSET_UPLOAD_FAILED");
       return null;
     } finally {
       loading.value = false;
     }
+  }
+
+  function importLocalAsset(projectId: string, file: File): AssetRef | null {
+    error.value = null;
+    if (file.size > MAX_ASSET_BYTES) {
+      error.value = localizedErrorForCode("ASSET_TOO_LARGE", localeStore.locale);
+      return null;
+    }
+    if (!isSupportedAssetFile(file)) {
+      error.value = localizedErrorForCode("UNSUPPORTED_ASSET_TYPE", localeStore.locale);
+      return null;
+    }
+
+    const asset: AssetRef = {
+      id: createLocalAssetId(file.name),
+      projectId,
+      name: file.name,
+      kind: assetKindForFile(file),
+      mimeType: file.type || "application/octet-stream",
+      sizeBytes: file.size,
+      objectKey: `local://${file.name}`,
+      createdAt: new Date().toISOString()
+    };
+    assets.value = [...assets.value, asset];
+    if (asset.kind === "image" && typeof URL.createObjectURL === "function") {
+      previewUrls.value = {
+        ...previewUrls.value,
+        [asset.id]: URL.createObjectURL(file)
+      };
+    }
+    return asset;
   }
 
   async function deleteAsset(projectId: string, assetId: string): Promise<boolean> {
@@ -108,7 +142,7 @@ export const useAssetsStore = defineStore("assets", () => {
       previewUrls.value = remainingPreviewUrls;
       return true;
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "asset delete failed";
+      error.value = localizeError(caught, localeStore.locale, "ASSET_DELETE_FAILED");
       return false;
     } finally {
       loading.value = false;
@@ -127,10 +161,26 @@ export const useAssetsStore = defineStore("assets", () => {
     clearError,
     loadAssets,
     uploadAsset,
+    importLocalAsset,
     deleteAsset
   };
 });
 
 function isSupportedAssetFile(file: File): boolean {
   return SUPPORTED_ASSET_MIME_TYPES.has(file.type) || /\.(ttf|otf|woff2?)$/i.test(file.name);
+}
+
+function assetKindForFile(file: File): AssetRef["kind"] {
+  if (file.type.startsWith("font/") || /\.(ttf|otf|woff2?)$/i.test(file.name)) {
+    return "font";
+  }
+  return "image";
+}
+
+function createLocalAssetId(fileName: string): string {
+  const slug = fileName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "asset";
+  const randomPart = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `local-${slug}-${randomPart}`;
 }

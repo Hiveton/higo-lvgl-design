@@ -3,9 +3,33 @@ import type { EventBinding, LayoutBox, ProjectDoc, WidgetNode, WidgetPropValue, 
 export type EditorCommand = {
   id: string;
   label: string;
+  message: EditorCommandMessage;
   apply(doc: ProjectDoc): ProjectDoc;
   revert(doc: ProjectDoc): ProjectDoc;
 };
+
+export type EditorCommandMessage =
+  | { key: "addWidget"; widgetType: WidgetNode["type"] }
+  | { key: "addEventBinding" }
+  | { key: "addScreen" }
+  | { key: "deleteScreen" }
+  | { key: "deleteWidget" }
+  | { key: "duplicateScreen" }
+  | { key: "moveWidget" }
+  | { key: "moveWidgetInLayers" }
+  | { key: "registerAsset" }
+  | { key: "removeEventBinding" }
+  | { key: "renameProject" }
+  | { key: "renameScreen" }
+  | { key: "reorderWidget" }
+  | { key: "resizeWidget" }
+  | { key: "updateTarget" }
+  | { key: "updateTheme" }
+  | { key: "updateWidgetLayout" }
+  | { key: "updateWidgetMetadata" }
+  | { key: "updateWidgetProps" }
+  | { key: "updateWidgetStyle" }
+  | { key: "unregisterAsset" };
 
 export type EditorHistory = {
   doc: ProjectDoc;
@@ -19,6 +43,7 @@ export type EditorHistory = {
 export type HistoryEntry = {
   id: string;
   label: string;
+  message: EditorCommandMessage;
   status: "done" | "undone";
   sequence: number;
 };
@@ -61,6 +86,7 @@ export function createHistory(initialDoc: ProjectDoc, limit = 100): EditorHistor
       entries.push({
         id: entryId,
         label: command.label,
+        message: command.message,
         status: "done",
         sequence
       });
@@ -107,6 +133,7 @@ export function addWidget(input: { parentId: string; widget: WidgetNode }): Edit
   return {
     id: `add-${input.widget.id}`,
     label: `Add ${input.widget.name}`,
+    message: { key: "addWidget", widgetType: input.widget.type },
     apply(doc) {
       return updateWidget(doc, input.parentId, (parent) => ({
         ...parent,
@@ -125,6 +152,7 @@ export function moveWidget(input: { widgetId: string; x: number; y: number }): E
   return {
     id: `move-${input.widgetId}`,
     label: "Move widget",
+    message: { key: "moveWidget" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current ? { x: current.layout.x, y: current.layout.y } : null;
@@ -160,6 +188,7 @@ export function updateWidgetStyle(input: { widgetId: string; style: WidgetStyle 
   return {
     id: `style-${input.widgetId}`,
     label: "Update widget style",
+    message: { key: "updateWidgetStyle" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current ? { ...current.style } : null;
@@ -189,6 +218,7 @@ export function resizeWidget(input: { widgetId: string; width: number; height: n
   return {
     id: `resize-${input.widgetId}`,
     label: "Resize widget",
+    message: { key: "resizeWidget" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current ? { width: current.layout.width, height: current.layout.height } : null;
@@ -218,12 +248,38 @@ export function resizeWidget(input: { widgetId: string; width: number; height: n
   };
 }
 
+export function setWidgetLayoutSnapshot(input: {
+  widgetId: string;
+  before: LayoutBox;
+  after: LayoutBox;
+  label?: string;
+}): EditorCommand {
+  return {
+    id: `layout-snapshot-${input.widgetId}`,
+    label: input.label ?? "Update widget layout",
+    message: commandMessageForLabel(input.label ?? "Update widget layout"),
+    apply(doc) {
+      return updateWidget(doc, input.widgetId, (widget) => ({
+        ...widget,
+        layout: cloneLayout(input.after)
+      }));
+    },
+    revert(doc) {
+      return updateWidget(doc, input.widgetId, (widget) => ({
+        ...widget,
+        layout: cloneLayout(input.before)
+      }));
+    }
+  };
+}
+
 export function updateWidgetLayout(input: { widgetId: string; layout: Partial<LayoutBox> }): EditorCommand {
   let previous: LayoutBox | null = null;
 
   return {
     id: `layout-${input.widgetId}`,
     label: "Update widget layout",
+    message: { key: "updateWidgetLayout" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current ? { ...current.layout } : null;
@@ -255,6 +311,7 @@ export function deleteWidget(input: { widgetId: string }): EditorCommand {
   return {
     id: `delete-${input.widgetId}`,
     label: "Delete widget",
+    message: { key: "deleteWidget" },
     apply(doc) {
       deleted ??= findWidgetLocation(doc, input.widgetId);
       if (!deleted) {
@@ -286,6 +343,7 @@ export function reorderWidget(input: { widgetId: string; direction: -1 | 1 }): E
   return {
     id: `reorder-${input.widgetId}-${input.direction}`,
     label: "Reorder widget",
+    message: { key: "reorderWidget" },
     apply(doc) {
       const current = findWidgetLocation(doc, input.widgetId);
       if (!current) {
@@ -316,6 +374,7 @@ export function moveWidgetToParent(input: { widgetId: string; targetParentId: st
   return {
     id: `move-parent-${input.widgetId}-${input.targetParentId}`,
     label: "Move widget in layers",
+    message: { key: "moveWidgetInLayers" },
     apply(doc) {
       const current = findWidgetLocation(doc, input.widgetId);
       const targetParent = findWidget(doc, input.targetParentId);
@@ -355,6 +414,7 @@ export function updateWidgetProps(input: {
   return {
     id: `props-${input.widgetId}`,
     label: "Update widget props",
+    message: { key: "updateWidgetProps" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current ? { ...current.props } : null;
@@ -389,6 +449,7 @@ export function updateWidgetMeta(input: {
   return {
     id: `meta-${input.widgetId}`,
     label: "Update widget metadata",
+    message: { key: "updateWidgetMetadata" },
     apply(doc) {
       const current = findWidget(doc, input.widgetId);
       previous ??= current
@@ -419,6 +480,7 @@ export function addEventBindingCommand(input: { binding: EventBinding }): Editor
   return {
     id: `add-event-${input.binding.id}`,
     label: "Add event binding",
+    message: { key: "addEventBinding" },
     apply(doc) {
       if (!findWidget(doc, input.binding.widgetId)) {
         return doc;
@@ -451,6 +513,7 @@ export function removeEventBindingCommand(input: { eventId: string }): EditorCom
   return {
     id: `remove-event-${input.eventId}`,
     label: "Remove event binding",
+    message: { key: "removeEventBinding" },
     apply(doc) {
       previousEvents ??= doc.events.map((event) => ({ ...event }));
       removed ??= doc.events.find((event) => event.id === input.eventId) ?? null;
@@ -474,6 +537,7 @@ export function removeEventBindingCommand(input: { eventId: string }): EditorCom
 export function replaceProjectDocCommand(input: {
   id: string;
   label: string;
+  message?: EditorCommandMessage;
   update(doc: ProjectDoc): ProjectDoc;
 }): EditorCommand {
   let previous: ProjectDoc | null = null;
@@ -481,6 +545,7 @@ export function replaceProjectDocCommand(input: {
   return {
     id: input.id,
     label: input.label,
+    message: input.message ?? commandMessageForLabel(input.label),
     apply(doc) {
       previous ??= cloneProjectDoc(doc);
       return input.update(cloneProjectDoc(doc));
@@ -489,6 +554,32 @@ export function replaceProjectDocCommand(input: {
       return previous ? cloneProjectDoc(previous) : doc;
     }
   };
+}
+
+function commandMessageForLabel(label: string): EditorCommandMessage {
+  const messages: Record<string, EditorCommandMessage> = {
+    "Add event binding": { key: "addEventBinding" },
+    "Add screen": { key: "addScreen" },
+    "Delete screen": { key: "deleteScreen" },
+    "Delete widget": { key: "deleteWidget" },
+    "Duplicate screen": { key: "duplicateScreen" },
+    "Move widget": { key: "moveWidget" },
+    "Move widget in layers": { key: "moveWidgetInLayers" },
+    "Register asset": { key: "registerAsset" },
+    "Remove event binding": { key: "removeEventBinding" },
+    "Rename project": { key: "renameProject" },
+    "Rename screen": { key: "renameScreen" },
+    "Reorder widget": { key: "reorderWidget" },
+    "Resize widget": { key: "resizeWidget" },
+    "Update target": { key: "updateTarget" },
+    "Update theme": { key: "updateTheme" },
+    "Update widget layout": { key: "updateWidgetLayout" },
+    "Update widget metadata": { key: "updateWidgetMetadata" },
+    "Update widget props": { key: "updateWidgetProps" },
+    "Update widget style": { key: "updateWidgetStyle" },
+    "Unregister asset": { key: "unregisterAsset" }
+  };
+  return messages[label] ?? { key: "updateWidgetProps" };
 }
 
 export function findWidgetById(doc: ProjectDoc, widgetId: string | null): WidgetNode | null {
@@ -507,7 +598,14 @@ function cloneWidget(widget: WidgetNode): WidgetNode {
 }
 
 function cloneLayout(layout: LayoutBox): LayoutBox {
-  return structuredClone(layout);
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+    align: layout.align,
+    flex: layout.flex ? { ...layout.flex } : undefined
+  };
 }
 
 function findWidget(doc: ProjectDoc, widgetId: string): WidgetNode | null {

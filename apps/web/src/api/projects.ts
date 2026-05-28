@@ -1,4 +1,5 @@
 import { authHeaders } from "./auth";
+import { apiError, ApiError } from "./errors";
 
 export type ProjectSummary = {
   id: string;
@@ -26,42 +27,12 @@ export type ProjectVersionResponse = {
   createdAt: string;
 };
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
-
-type ErrorPayload = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
-};
-
-async function apiError(response: Response, fallback: string): Promise<ApiError> {
-  let message = fallback;
-  try {
-    const payload = (await response.clone().json()) as ErrorPayload;
-    if (payload.error?.message) {
-      message = payload.error.message;
-    }
-  } catch {
-    // Keep the endpoint-specific fallback when the body is not JSON.
-  }
-  return new ApiError(message, response.status);
-}
-
 export async function listProjects(): Promise<ProjectSummary[]> {
   const response = await fetch("/api/projects", {
     headers: authHeaders()
   });
   if (!response.ok) {
-    throw await apiError(response, `project list failed with status ${response.status}`);
+    throw await apiError(response, "PROJECT_LIST_FAILED", `project list failed with status ${response.status}`);
   }
   const payload = (await response.json()) as { projects: ProjectSummary[] };
   return payload.projects;
@@ -86,7 +57,7 @@ export async function createProject(name: string, target?: ProjectSummary["targe
     })
   });
   if (!response.ok) {
-    throw await apiError(response, `project create failed with status ${response.status}`);
+    throw await apiError(response, "PROJECT_CREATE_FAILED", `project create failed with status ${response.status}`);
   }
   const payload = (await response.json()) as { project: ProjectResponse };
   return payload.project;
@@ -97,7 +68,7 @@ export async function getProject(projectId: string): Promise<ProjectResponse> {
     headers: authHeaders()
   });
   if (!response.ok) {
-    throw await apiError(response, `project lookup failed with status ${response.status}`);
+    throw await apiError(response, "PROJECT_LOOKUP_FAILED", `project lookup failed with status ${response.status}`);
   }
   const payload = (await response.json()) as { project: ProjectResponse };
   return payload.project;
@@ -112,7 +83,7 @@ export async function createProjectVersion(projectId: string, name: string): Pro
     body: JSON.stringify({ name })
   });
   if (!response.ok) {
-    throw await apiError(response, `project version create failed with status ${response.status}`);
+    throw await apiError(response, "PROJECT_VERSION_CREATE_FAILED", `project version create failed with status ${response.status}`);
   }
   const payload = (await response.json()) as { version: ProjectVersionResponse };
   return payload.version;
@@ -127,7 +98,7 @@ export async function exportProjectC(projectId: string): Promise<ExportJobRespon
     body: JSON.stringify({ createVersion: true })
   });
   if (!response.ok) {
-    throw await apiError(response, `export failed with status ${response.status}`);
+    throw await apiError(response, "EXPORT_FAILED", `export failed with status ${response.status}`);
   }
   return response.json() as Promise<ExportJobResponse>;
 }
@@ -141,9 +112,10 @@ export async function saveProjectDoc(projectId: string, doc: unknown): Promise<{
     body: JSON.stringify({ doc })
   });
   if (!response.ok) {
-    throw await apiError(response, `save failed with status ${response.status}`);
+    throw await apiError(response, "SAVE_FAILED", `save failed with status ${response.status}`);
   }
   return response.json() as Promise<{ projectId: string; updatedAt: string }>;
 }
 
 export { downloadJobResult, getJob, type JobLogEntry, type JobResponse } from "./jobs";
+export { ApiError };

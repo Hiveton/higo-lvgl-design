@@ -7,6 +7,7 @@ import EditorShell from "./EditorShell.vue";
 import LogPanel from "./LogPanel.vue";
 import ScreensPanel from "./ScreensPanel.vue";
 import { useAssetsStore } from "../stores/assets";
+import { useLocaleStore } from "../stores/locale";
 import { useProjectStore } from "../stores/project";
 
 function assetUploadResponse(): Response {
@@ -69,6 +70,7 @@ function signInForCloudSaves(): void {
 
 afterEach(() => {
   clearAuthToken();
+  localStorage.removeItem("lvgl-editor-locale");
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -109,6 +111,9 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="canvas-add-screen-button"]').attributes("type")).toBe("button");
     expect(wrapper.get('[data-testid="canvas-add-screen-button"]').attributes("aria-label")).toBe("Add screen from canvas toolbar");
     expect(wrapper.get('[data-testid="canvas-add-screen-button"]').attributes("title")).toBe("Add screen from canvas toolbar");
+    expect(wrapper.find('[data-testid="screen-row-screen-1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="screen-row-heart-rate"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="screen-row-heart rate"]').exists()).toBe(false);
     expect((wrapper.get('[data-testid="layer-name-settings-button"]').element as HTMLInputElement).value).toBe("Settings_Button");
     expect(wrapper.get('[data-testid="canvas-widget-steps-metric"]').text()).toContain("7,842");
     expect(wrapper.get('[data-testid="status-activity"]').text()).toBe("Editor ready");
@@ -119,6 +124,69 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="status-save-dot"]').attributes("aria-label")).toBe("Save status: All changes saved");
     expect(wrapper.get('[data-testid="status-save-dot"]').attributes("title")).toBe("Save status: All changes saved");
     expect(wrapper.text()).not.toContain("Build completed successfully");
+  });
+
+  it("switches toolbar chrome copy between English and Chinese", async () => {
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    expect(wrapper.get('[data-testid="locale-select"]').element).toHaveProperty("value", "en-US");
+    expect(wrapper.get('[data-testid="preview-button"]').text()).toBe("Preview");
+
+    await wrapper.get('[data-testid="locale-select"]').setValue("zh-CN");
+
+    expect(localStorage.getItem("lvgl-editor-locale")).toBe("zh-CN");
+    expect(wrapper.get('[data-testid="preview-button"]').text()).toBe("预览");
+    expect(wrapper.get('[data-testid="build-button"]').text()).toBe("登录后构建");
+    expect(wrapper.text()).toContain("语言");
+    expect(wrapper.get('[data-testid="widgets-nav-button"]').text()).toContain("控件");
+    expect(wrapper.get('[data-testid="layers-nav-button"]').text()).toContain("图层");
+    expect(wrapper.get('[data-testid="screens-nav-button"]').text()).toContain("屏幕");
+    expect(wrapper.get('[data-testid="widget-search-input"]').attributes("placeholder")).toBe("搜索控件...");
+    expect(wrapper.get('[data-testid="widget-card-button"]').text()).toContain("按钮");
+    expect(wrapper.get('[data-testid="widget-card-label"]').text()).toContain("文本");
+    expect(wrapper.get('[data-testid="widget-card-switch"]').attributes("aria-label")).toBe("添加 开关 控件");
+    expect(wrapper.get('[data-testid="layer-list-header"]').text()).toContain("对象");
+    expect(wrapper.get('[data-testid="screen-list-header"]').text()).toContain("屏幕");
+    expect(wrapper.get('[data-testid="layer-row-time-label"]').attributes("aria-label")).toBe("选择 Time_Label 文本 图层");
+    expect(wrapper.get('[data-testid="canvas-widget-time-label"]').attributes("title")).toBe("选择并拖拽 Time_Label 文本 控件");
+
+    await wrapper.get('[data-testid="resources-nav-button"]').trigger("click");
+    expect(wrapper.get('[data-testid="sample-asset-heart-png"]').attributes("aria-label")).toBe("选择参考资源 heart.png，图片，图片 64x64");
+  });
+
+  it("shows Chinese project menu and new project dialog copy", async () => {
+    signInForCloudSaves();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="locale-select"]').setValue("zh-CN");
+    await wrapper.get('[data-testid="toolbar-menu-button"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="menu-project-count"]').text()).toBe("0 个云项目");
+    expect(wrapper.get('[data-testid="menu-load-projects-button"]').text()).toBe("刷新云项目");
+    expect(wrapper.get('[data-testid="menu-project-empty-state"]').text()).toContain("尚未加载云项目");
+    expect(wrapper.get('[data-testid="menu-new-project-button"]').text()).toBe("创建云项目");
+    expect(wrapper.get('[data-testid="menu-login-email-input"]').attributes("placeholder")).toBe("邮箱");
+    expect(wrapper.get('[data-testid="menu-login-password-input"]').attributes("placeholder")).toBe("密码");
+    expect(wrapper.get('[data-testid="menu-demo-login-button"]').text()).toBe("演示登录");
+
+    await wrapper.get('[data-testid="toolbar-menu-button"]').trigger("click");
+    await wrapper.get('[data-testid="new-project-button"]').trigger("click");
+
+    expect(wrapper.get("#new-project-dialog-title").text()).toBe("创建云项目");
+    expect(wrapper.get("#new-project-dialog-description").text()).toContain("创建到云端存储前");
+    expect(wrapper.get('[data-testid="new-project-name-input"]').attributes("aria-label")).toBe("云项目名称");
+    expect(wrapper.get('[data-testid="cancel-new-project-button"]').text()).toBe("取消");
+    expect(wrapper.get('[data-testid="confirm-new-project-button"]').text()).toBe("创建项目");
   });
 
   it("updates status bar coordinates from the artboard mouse position", async () => {
@@ -216,6 +284,61 @@ describe("EditorShell", () => {
     expect(wrapper.find('[data-testid="canvas-widget-spinner-1"] .spinner-preview').exists()).toBe(true);
     expect(wrapper.find('[data-testid="canvas-widget-chart-1"] .chart-preview').exists()).toBe(true);
     expect(wrapper.find('[data-testid="canvas-widget-line-1"] .line-preview').exists()).toBe(true);
+  });
+
+  it("uses the current locale for new widget default display text", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    useLocaleStore(pinia).setLocale("zh-CN");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="widget-card-label"]').trigger("click");
+    await wrapper.get('[data-testid="widget-card-button"]').trigger("click");
+    await wrapper.get('[data-testid="widget-card-checkbox"]').trigger("click");
+    await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="canvas-widget-label-1"]').text()).toContain("文本");
+    expect(wrapper.get('[data-testid="canvas-widget-button-1"]').text()).toContain("按钮");
+    expect(wrapper.get('[data-testid="canvas-widget-checkbox-1"] .checkbox-preview').text()).toContain("复选框");
+    expect(wrapper.get('[data-testid="canvas-widget-dropdown-1"] .dropdown-preview').text()).toContain("选项 1");
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain('lv_label_set_text(ui_Label_1, "文本");');
+    expect(preview).toContain('lv_label_set_text(ui_Button_1_Label, "按钮");');
+    expect(preview).toContain('lv_checkbox_set_text(ui_Checkbox_1, "复选框");');
+    expect(preview).toContain('lv_dropdown_set_options(ui_Dropdown_1, "选项 1\\n选项 2");');
+  });
+
+  it("uses localized dropdown fallback text for legacy docs without options", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    useLocaleStore(pinia).setLocale("zh-CN");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
+    const dropdown = store.selectedWidget;
+    if (!dropdown) {
+      throw new Error("expected selected dropdown");
+    }
+    delete dropdown.props.options;
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="canvas-widget-dropdown-1"] .dropdown-preview').text()).toContain("选项 1");
+    await wrapper.get('[data-testid="preview-button"]').trigger("click");
+    expect(wrapper.get('[data-testid="preview-control-dropdown-1"]').text()).toContain("选项 1");
+    wrapper.unmount();
   });
 
   it("filters widgets from the palette search", async () => {
@@ -395,6 +518,8 @@ describe("EditorShell", () => {
         event: "LV_EVENT_CLICKED",
         handlerName: "time_label_clicked"
       });
+      timeLabel.style.textColor = "#abc";
+      timeLabel.style.bgColor = "red";
       store.registerAsset({
         id: "asset-icon-heart",
         projectId: store.project.id,
@@ -418,12 +543,15 @@ describe("EditorShell", () => {
     await wrapper.vm.$nextTick();
 
     const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("lv_obj_t * ui_Time_Label;");
+    expect(preview).toContain("lv_obj_t * ui_Settings_Button_Label;");
     expect(preview).toContain("lv_label_create(ui_Screen_1)");
     expect(preview).toContain("lv_obj_set_layout(ui_Screen_1, LV_LAYOUT_FLEX);");
     expect(preview).toContain("lv_obj_set_flex_flow(ui_Screen_1, LV_FLEX_FLOW_COLUMN_WRAP);");
     expect(preview).toContain("lv_obj_align(ui_Time_Label, LV_ALIGN_CENTER, 150, 40);");
     expect(preview).toContain('lv_label_set_text(ui_Time_Label, "10:09");');
     expect(preview).toContain("lv_obj_add_event_cb(ui_Time_Label, time_label_clicked, LV_EVENT_CLICKED, NULL);");
+    expect(preview).toContain("lv_obj_set_style_text_color(ui_Time_Label, lv_color_hex(0xAABBCC), LV_PART_MAIN | LV_STATE_DEFAULT);");
     expect(preview).toContain("void time_label_clicked(lv_event_t * e)");
     expect(preview).toContain("/* User code can be added here. */");
     expect(preview).toContain('lv_label_set_text(ui_Settings_Button_Label, "Settings");');
@@ -431,6 +559,98 @@ describe("EditorShell", () => {
     expect(preview).toContain("lv_slider_set_range(ui_Slider_1, 0, 100);");
     expect(preview).toContain("lv_img_set_src(ui_Image_1, &ui_img_icon_heart_png);");
     expect(preview).not.toContain("0xtransparent");
+    expect(preview).not.toContain("0xred");
+  });
+
+  it("blocks the generated code preview when an image widget references a missing asset", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    const root = store.activeScreen?.root;
+    if (!root) {
+      throw new Error("expected active screen root");
+    }
+    root.children.push({
+      id: "broken-image",
+      type: "image",
+      name: "Broken_Image",
+      parentId: root.id,
+      children: [],
+      layout: { x: 10, y: 20, width: 96, height: 96 },
+      props: { assetId: "missing-asset" },
+      style: {},
+      locked: false,
+      hidden: false
+    });
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("Code generation blocked: missing image asset missing-asset");
+    expect(preview).not.toContain("lv_img_set_src");
+    wrapper.unmount();
+  });
+
+  it("blocks the generated code preview when a custom font asset reference is missing", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    const root = store.activeScreen?.root;
+    if (!root) {
+      throw new Error("expected active screen root");
+    }
+    root.children[0].style.font = "missing-font-asset";
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("Code generation blocked: missing font asset missing-font-asset");
+    expect(preview).not.toContain("metadata only");
+    wrapper.unmount();
+  });
+
+  it("keeps generated code preview symbols unique for duplicate widget names", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    const root = store.activeScreen!.root;
+    const first = root.children.find((widget) => widget.id === "time-label")!;
+    const second = root.children.find((widget) => widget.id === "date-label")!;
+    first.name = "Duplicate";
+    second.name = "Duplicate";
+    first.type = "button";
+    first.props = { text: "Primary" };
+    second.type = "button";
+    second.props = { text: "Secondary" };
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("lv_obj_t * ui_Duplicate;");
+    expect(preview).toContain("lv_obj_t * ui_Duplicate_Label;");
+    expect(preview).toContain("lv_obj_t * ui_Duplicate_2;");
+    expect(preview).toContain("lv_obj_t * ui_Duplicate_Label_2;");
+    expect(preview).toContain("ui_Duplicate = lv_btn_create(ui_Screen_1);");
+    expect(preview).toContain("ui_Duplicate_Label = lv_label_create(ui_Duplicate);");
+    expect(preview).toContain("ui_Duplicate_2 = lv_btn_create(ui_Screen_1);");
+    expect(preview).toContain("ui_Duplicate_Label_2 = lv_label_create(ui_Duplicate_2);");
+    expect(preview.match(/ui_Duplicate = lv_btn_create/g)).toHaveLength(1);
   });
 
   it("renders canvas widgets with flex wrap, padding and align layout metadata", async () => {
@@ -1163,16 +1383,62 @@ describe("EditorShell", () => {
     const store = useProjectStore(pinia);
 
     await wrapper.get('[data-testid="widget-card-chart"]').trigger("click");
-    await wrapper.get('[data-testid="prop-values-input"]').setValue("10, 40, 90");
+    store.updateSelectedProps({ min: 20, max: 80, pointCount: 3, values: [0, 50, 120, 60] });
+    await wrapper.vm.$nextTick();
     await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
     await wrapper.get('[data-testid="prop-options-input"]').setValue("Auto\nManual\nOff");
     await wrapper.get('[data-testid="prop-selected-input"]').setValue("1");
+    await wrapper.get('[data-testid="widget-card-switch"]').trigger("click");
+    await wrapper.get('[data-testid="widget-card-slider"]').trigger("click");
+    const beforeDoc = JSON.stringify(store.project);
 
     await wrapper.get('[data-testid="preview-button"]').trigger("click");
 
-    expect(wrapper.get('[data-testid="preview-widget-chart-1"] .chart-preview span').attributes("style")).toContain("height: 10%");
+    expect(wrapper.findAll('[data-testid="preview-widget-chart-1"] .chart-preview span')).toHaveLength(3);
+    expect(wrapper.get('[data-testid="preview-widget-chart-1"] .chart-preview span').attributes("style")).toContain("height: 4%");
     expect(wrapper.get('[data-testid="preview-widget-dropdown-1"] .dropdown-preview').text()).toContain("Manual");
-    expect(store.selectedWidget?.type).toBe("dropdown");
+    expect(wrapper.get('[data-testid="preview-control-switch-1"]').attributes("aria-pressed")).toBe("false");
+    await wrapper.get('[data-testid="preview-control-switch-1"]').trigger("click");
+    expect(wrapper.get('[data-testid="preview-control-switch-1"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get('[data-testid="preview-status-message"]').text()).toBe("Preview interaction is temporary. Refresh preview before capturing a screenshot.");
+    expect((wrapper.get('[data-testid="screenshot-preview-button"]').element as HTMLButtonElement).disabled).toBe(true);
+    await wrapper.get('[data-testid="refresh-preview-button"]').trigger("click");
+    expect((wrapper.get('[data-testid="screenshot-preview-button"]').element as HTMLButtonElement).disabled).toBe(false);
+    await wrapper.get('[data-testid="preview-control-dropdown-1"]').setValue("2");
+    expect((wrapper.get('[data-testid="preview-control-dropdown-1"]').element as HTMLSelectElement).value).toBe("2");
+    await wrapper.get('[data-testid="preview-control-slider-1"]').setValue("80");
+    expect((wrapper.get('[data-testid="preview-control-slider-1"]').element as HTMLInputElement).value).toBe("80");
+    expect(JSON.stringify(store.project)).toBe(beforeDoc);
+  });
+
+  it("logs bound event handlers from interactive preview controls", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    store.addEventBinding("LV_EVENT_CLICKED", "on_start_clicked", "start-button");
+    await wrapper.get('[data-testid="widget-card-switch"]').trigger("click");
+    const switchId = store.selectedWidget?.id;
+    if (!switchId) {
+      throw new Error("expected selected switch");
+    }
+    store.addEventBinding("LV_EVENT_VALUE_CHANGED", "on_switch_changed", switchId);
+
+    await wrapper.get('[data-testid="preview-button"]').trigger("click");
+    await wrapper.get('[data-testid="preview-control-start-button"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="preview-status-message"]').text()).toBe("Preview event LV_EVENT_CLICKED -> on_start_clicked");
+    expect(wrapper.text()).toContain("Preview event LV_EVENT_CLICKED -> on_start_clicked");
+
+    await wrapper.get('[data-testid="preview-control-switch-1"]').trigger("click");
+    expect(wrapper.get('[data-testid="preview-status-message"]').text()).toBe("Preview event LV_EVENT_VALUE_CHANGED -> on_switch_changed");
+    expect(wrapper.text()).toContain("Preview event LV_EVENT_VALUE_CHANGED -> on_switch_changed");
+    expect((wrapper.get('[data-testid="screenshot-preview-button"]').element as HTMLButtonElement).disabled).toBe(true);
+    wrapper.unmount();
   });
 
   it("supports preview refresh and screenshot controls without changing ProjectDoc", async () => {
@@ -1245,7 +1511,7 @@ describe("EditorShell", () => {
     expect(timeline).toContain("Event");
     expect(timeline).toContain("LV_EVENT_CLICKED -> on_time_clicked");
     expect(timeline).toContain("Command");
-    expect(timeline).toContain("Add Label_1");
+    expect(timeline).toContain("Add Label widget");
     expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("Kind");
     expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("Item");
     expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("Status");
@@ -1256,6 +1522,29 @@ describe("EditorShell", () => {
     expect(wrapper.find('[data-testid="timeline-kind-event"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="timeline-kind-command"]').exists()).toBe(true);
     expect(wrapper.findAll('[data-testid="timeline-status"]').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("localizes command entries in the Chinese timeline tab", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="locale-select"]').setValue("zh-CN");
+    await wrapper.get('[data-testid="widget-card-label"]').trigger("click");
+    await wrapper.get('[data-testid="bottom-timeline-tab"]').trigger("click");
+
+    const timeline = wrapper.get('[data-testid="timeline-list"]').text();
+    expect(timeline).toContain("屏幕");
+    expect(timeline).toContain("命令");
+    expect(timeline).toContain("添加 文本 控件");
+    expect(timeline).not.toContain("Add ");
+    expect(timeline).not.toContain("Label_1");
+    expect(timeline).toContain("已完成");
+    expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("类型");
+    expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("项目");
+    expect(wrapper.get('[data-testid="timeline-list-header"]').text()).toContain("状态");
   });
 
   it("updates the selected widget text from the inspector", async () => {
@@ -1319,6 +1608,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="style-font-select"]').setValue("font-1");
 
     expect(wrapper.get('[data-testid="style-font-select"]').text()).toContain("brand.ttf");
+    expect(wrapper.get('[data-testid="font-asset-export-note"]').text()).toContain("metadata only");
     expect(projectStore.selectedWidget?.style.font).toBe("font-1");
 
     await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
@@ -1473,7 +1763,7 @@ describe("EditorShell", () => {
 
     await wrapper.get('[data-testid="widget-card-spinner"]').trigger("click");
     await wrapper.get('[data-testid="prop-spin-time-input"]').setValue("0");
-    expect(wrapper.get('[data-testid="prop-spin-time-error"]').text()).toBe("spinTime must be greater than 0");
+    expect(wrapper.get('[data-testid="prop-spin-time-error"]').text()).toBe("Spin Time must be greater than 0");
     expect(wrapper.get('[data-testid="prop-spin-time-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="prop-spin-time-error"]').attributes("id")).toBe("prop-spin-time-error");
     expect(wrapper.get('[data-testid="prop-spin-time-input"]').attributes("aria-invalid")).toBe("true");
@@ -1481,7 +1771,7 @@ describe("EditorShell", () => {
     expect(store.selectedWidget?.props.spinTime).toBe(1000);
 
     await wrapper.get('[data-testid="prop-arc-length-input"]').setValue("-1");
-    expect(wrapper.get('[data-testid="prop-arc-length-error"]').text()).toBe("arcLength must be greater than 0");
+    expect(wrapper.get('[data-testid="prop-arc-length-error"]').text()).toBe("Arc Length must be greater than 0");
     expect(wrapper.get('[data-testid="prop-arc-length-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="prop-arc-length-error"]').attributes("id")).toBe("prop-arc-length-error");
     expect(wrapper.get('[data-testid="prop-arc-length-input"]').attributes("aria-invalid")).toBe("true");
@@ -1490,7 +1780,7 @@ describe("EditorShell", () => {
 
     await wrapper.get('[data-testid="widget-card-chart"]').trigger("click");
     await wrapper.get('[data-testid="prop-point-count-input"]').setValue("0");
-    expect(wrapper.get('[data-testid="prop-point-count-error"]').text()).toBe("pointCount must be greater than 0");
+    expect(wrapper.get('[data-testid="prop-point-count-error"]').text()).toBe("Point Count must be greater than 0");
     expect(wrapper.get('[data-testid="prop-point-count-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="prop-point-count-error"]').attributes("id")).toBe("prop-point-count-error");
     expect(wrapper.get('[data-testid="prop-point-count-input"]').attributes("aria-invalid")).toBe("true");
@@ -1499,7 +1789,7 @@ describe("EditorShell", () => {
 
     await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
     await wrapper.get('[data-testid="prop-selected-input"]').setValue("-1");
-    expect(wrapper.get('[data-testid="prop-selected-error"]').text()).toBe("selected must be non-negative");
+    expect(wrapper.get('[data-testid="prop-selected-error"]').text()).toBe("Selected must be non-negative");
     expect(wrapper.get('[data-testid="prop-selected-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="prop-selected-error"]').attributes("id")).toBe("prop-selected-error");
     expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-invalid")).toBe("true");
@@ -1523,21 +1813,27 @@ describe("EditorShell", () => {
     const store = useProjectStore(pinia);
 
     await wrapper.get('[data-testid="widget-card-chart"]').trigger("click");
-    await wrapper.get('[data-testid="prop-values-input"]').setValue("10, 40, 90");
+    store.updateSelectedProps({ min: 20, max: 80, pointCount: 3, values: [0, 50, 120, 60] });
+    await wrapper.vm.$nextTick();
 
     expect(store.selectedWidget?.props).toMatchObject({
-      values: [10, 40, 90],
+      min: 20,
+      max: 80,
+      values: [0, 50, 120, 60],
       pointCount: 3
     });
-    expect(wrapper.get('[data-testid="canvas-widget-chart-1"] .chart-preview span').attributes("style")).toContain("height: 10%");
+    expect(wrapper.findAll('[data-testid="canvas-widget-chart-1"] .chart-preview span')).toHaveLength(3);
+    expect(wrapper.get('[data-testid="canvas-widget-chart-1"] .chart-preview span').attributes("style")).toContain("height: 4%");
 
     await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
     await wrapper.vm.$nextTick();
 
     const preview = wrapper.get('[data-testid="code-preview"]').text();
     expect(preview).toContain("lv_chart_series_t * ui_Chart_1_series = lv_chart_add_series(ui_Chart_1, lv_palette_main(LV_PALETTE_BLUE), LV_CHART_AXIS_PRIMARY_Y);");
-    expect(preview).toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 10);");
-    expect(preview).toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 90);");
+    expect(preview).toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 20);");
+    expect(preview).toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 50);");
+    expect(preview).toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 80);");
+    expect(preview).not.toContain("lv_chart_set_next_value(ui_Chart_1, ui_Chart_1_series, 60);");
     expect(preview).toContain("lv_chart_refresh(ui_Chart_1);");
   });
 
@@ -1553,7 +1849,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="widget-card-chart"]').trigger("click");
     await wrapper.get('[data-testid="prop-values-input"]').setValue("10, nope, 90");
 
-    expect(wrapper.get('[data-testid="prop-values-error"]').text()).toBe("values must be comma, space or newline separated numbers");
+    expect(wrapper.get('[data-testid="prop-values-error"]').text()).toBe("Values must be comma, space or newline separated numbers");
     expect(wrapper.get('[data-testid="prop-values-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="prop-values-error"]').attributes("id")).toBe("prop-values-error");
     expect(wrapper.get('[data-testid="prop-values-input"]').attributes("aria-invalid")).toBe("true");
@@ -1640,7 +1936,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
     await wrapper.get('[data-testid="layout-width-input"]').setValue("-1");
 
-    expect(wrapper.get('[data-testid="layout-width-error"]').text()).toBe("width must be greater than 0");
+    expect(wrapper.get('[data-testid="layout-width-error"]').text()).toBe("Width must be greater than 0");
     expect(wrapper.get('[data-testid="layout-width-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="layout-width-error"]').attributes("id")).toBe("layout-width-error");
     expect(wrapper.get('[data-testid="layout-width-input"]').attributes("aria-invalid")).toBe("true");
@@ -1656,7 +1952,7 @@ describe("EditorShell", () => {
 
     await wrapper.get('[data-testid="layout-height-input"]').setValue("0");
 
-    expect(wrapper.get('[data-testid="layout-height-error"]').text()).toBe("height must be greater than 0");
+    expect(wrapper.get('[data-testid="layout-height-error"]').text()).toBe("Height must be greater than 0");
     expect(wrapper.get('[data-testid="layout-height-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="layout-height-error"]').attributes("id")).toBe("layout-height-error");
     expect(wrapper.get('[data-testid="layout-height-input"]').attributes("aria-invalid")).toBe("true");
@@ -1678,7 +1974,7 @@ describe("EditorShell", () => {
     const store = useProjectStore();
 
     await wrapper.get('[data-testid="style-radius-input"]').setValue("-1");
-    expect(wrapper.get('[data-testid="style-radius-error"]').text()).toBe("radius must be non-negative");
+    expect(wrapper.get('[data-testid="style-radius-error"]').text()).toBe("Radius must be non-negative");
     expect(wrapper.get('[data-testid="style-radius-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="style-radius-error"]').attributes("id")).toBe("style-radius-error");
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("aria-invalid")).toBe("true");
@@ -1686,7 +1982,7 @@ describe("EditorShell", () => {
     expect(store.selectedWidget?.style.radius).toBeUndefined();
 
     await wrapper.get('[data-testid="style-padding-top-input"]').setValue("-4");
-    expect(wrapper.get('[data-testid="style-padding-top-error"]').text()).toBe("padding top must be non-negative");
+    expect(wrapper.get('[data-testid="style-padding-top-error"]').text()).toBe("Padding Top must be non-negative");
     expect(wrapper.get('[data-testid="style-padding-top-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="style-padding-top-error"]').attributes("id")).toBe("style-padding-top-error");
     expect(wrapper.get('[data-testid="style-padding-top-input"]').attributes("aria-invalid")).toBe("true");
@@ -1697,7 +1993,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
     await wrapper.get('[data-testid="layout-gap-input"]').setValue("-8");
 
-    expect(wrapper.get('[data-testid="layout-gap-error"]').text()).toBe("gap must be non-negative");
+    expect(wrapper.get('[data-testid="layout-gap-error"]').text()).toBe("Gap must be non-negative");
     expect(wrapper.get('[data-testid="layout-gap-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="layout-gap-error"]').attributes("id")).toBe("layout-gap-error");
     expect(wrapper.get('[data-testid="layout-gap-input"]').attributes("aria-invalid")).toBe("true");
@@ -1743,6 +2039,52 @@ describe("EditorShell", () => {
     widget = wrapper.get('[data-testid="canvas-widget-date-label"]');
     expect(widget.attributes("style")).toContain("width: 184px");
     expect(widget.attributes("style")).toContain("height: 32px");
+    wrapper.unmount();
+  });
+
+  it("coalesces canvas drag and resize into one undo entry each", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+
+    const historyBefore = store.historyEntries.length;
+    await wrapper.get('[data-testid="canvas-widget-date-label"]').trigger("mousedown", {
+      clientX: 168,
+      clientY: 105
+    });
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: 180, clientY: 115 }));
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: 198, clientY: 125 }));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore);
+
+    document.dispatchEvent(new MouseEvent("mouseup"));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore + 1);
+    expect(store.historyEntries.at(-1)?.label).toBe("Move widget");
+
+    await wrapper.get('[data-testid="resize-handle-date-label"]').trigger("mousedown", {
+      clientX: 348,
+      clientY: 149
+    });
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: 360, clientY: 154 }));
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: 378, clientY: 159 }));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore + 1);
+
+    document.dispatchEvent(new MouseEvent("mouseup"));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore + 2);
+    expect(store.historyEntries.at(-1)?.label).toBe("Resize widget");
+
     wrapper.unmount();
   });
 
@@ -1958,10 +2300,10 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="screen-summary"]').attributes("role")).toBe("status");
     expect(wrapper.get('[data-testid="screen-summary"]').attributes("aria-live")).toBe("polite");
     expect(wrapper.get('[data-testid="screen-summary"]').attributes("aria-atomic")).toBe("true");
-    expect(wrapper.get('[data-testid="screen-row-home"]').attributes("type")).toBe("button");
-    expect(wrapper.get('[data-testid="screen-row-home"]').attributes("aria-label")).toBe("Open Home screen, Active, 7 widgets");
-    expect(wrapper.get('[data-testid="screen-row-home"]').attributes("title")).toBe("Open Home screen, Active, 7 widgets");
-    expect(wrapper.get('[data-testid="screen-row-home"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get('[data-testid="screen-row-screen-1"]').attributes("type")).toBe("button");
+    expect(wrapper.get('[data-testid="screen-row-screen-1"]').attributes("aria-label")).toBe("Open Screen_1 screen, Active, 7 widgets");
+    expect(wrapper.get('[data-testid="screen-row-screen-1"]').attributes("title")).toBe("Open Screen_1 screen, Active, 7 widgets");
+    expect(wrapper.get('[data-testid="screen-row-screen-1"]').attributes("aria-pressed")).toBe("true");
 
     await wrapper.get('[data-testid="add-screen-button"]').trigger("click");
     expect(wrapper.text()).toContain("Screen_2");
@@ -1988,7 +2330,7 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="active-screen-label"]').text()).toBe("Screen_2");
   });
 
-  it("turns design placeholder screen rows into real screens when clicked", async () => {
+  it("keeps the screens panel bound to real ProjectDoc screens only", async () => {
     const wrapper = mount(EditorShell, {
       global: {
         plugins: [createPinia()]
@@ -1997,18 +2339,19 @@ describe("EditorShell", () => {
     const store = useProjectStore();
 
     expect(store.project.screens).toHaveLength(1);
-    expect(wrapper.get('[data-testid="screen-row-activity"]').classes()).toContain("ghost");
+    expect(wrapper.get('[data-testid="screen-summary"]').text()).toContain("1 screen");
+    expect(wrapper.find('[data-testid="screen-row-screen-1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="screen-row-activity"]').exists()).toBe(false);
+    expect(wrapper.find(".screen-row.ghost").exists()).toBe(false);
 
-    await wrapper.get('[data-testid="screen-row-activity"]').trigger("click");
+    await wrapper.get('[data-testid="add-screen-button"]').trigger("click");
     await wrapper.vm.$nextTick();
 
-    expect(store.project.screens.map((screen) => screen.name)).toContain("Activity");
-    expect(wrapper.get('[data-testid="active-screen-label"]').text()).toBe("Activity");
+    expect(store.project.screens.map((screen) => screen.name)).toEqual(["Screen_1", "Screen_2"]);
+    expect(wrapper.get('[data-testid="active-screen-label"]').text()).toBe("Screen_2");
     expect(wrapper.get('[data-testid="screen-summary"]').text()).toContain("2 screens");
-    expect(wrapper.get('[data-testid="screen-row-activity"]').classes()).not.toContain("ghost");
-    expect(wrapper.get('[data-testid="layer-empty-state"]').text()).toContain("No widgets on this screen");
-    expect(wrapper.get('[data-testid="device-surface"]').classes()).toContain("empty");
-    expect(wrapper.find('[data-testid^="canvas-widget-"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="screen-row-activity"]').exists()).toBe(false);
+    expect(wrapper.find(".screen-row.ghost").exists()).toBe(false);
   });
 
   it("uses singular labels for one screen and one widget in the screens list", () => {
@@ -2042,6 +2385,9 @@ describe("EditorShell", () => {
       }
     } satisfies ScreenNode;
     const wrapper = mount(ScreensPanel, {
+      global: {
+        plugins: [createPinia()]
+      },
       props: {
         activeScreen: screen,
         screens: [screen],
@@ -2332,6 +2678,36 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid^="remove-event-"]').attributes("title")).toBe("Remove LV_EVENT_CLICKED event from Time_Label handled by on_time_clicked");
     expect(wrapper.get('[data-testid^="remove-event-"] svg').attributes("data-icon-name")).toBe("close");
     expect(wrapper.find('[data-testid="event-empty-state"]').exists()).toBe(false);
+  });
+
+  it("shows event bindings immediately when adding them to a different target widget", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+
+    await wrapper.get('[data-testid="inspector-events-tab"]').trigger("click");
+    await wrapper.get('[data-testid="event-target-select"]').setValue("start-button");
+    await wrapper.get('[data-testid="event-handler-input"]').setValue("on_start_clicked");
+    await wrapper.get('[data-testid="add-event-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(store.project.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        widgetId: "start-button",
+        event: "LV_EVENT_CLICKED",
+        handlerName: "on_start_clicked"
+      })
+    ]));
+    expect(wrapper.find('[data-testid="event-empty-state"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="event-list"] [data-event-cell="target"]').text()).toContain("Start_Button");
+    expect(wrapper.find('[data-testid="event-list"] [data-event-cell="handler"]').text()).toBe("on_start_clicked");
+
+    await wrapper.get('[data-testid^="remove-event-"]').trigger("click");
+    expect(store.project.events.some((event) => event.handlerName === "on_start_clicked")).toBe(false);
   });
 
   it("submits event bindings with Enter and disables empty handlers", async () => {
@@ -2696,6 +3072,80 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="asset-result-count"]').text()).toBe("0 resources");
     expect(wrapper.get('[data-testid="assets-empty-state"]').text()).toContain("No matching resources");
     expect(wrapper.find('[data-testid="sample-asset-lv-font-montserrat-14"]').exists()).toBe(false);
+  });
+
+  it("imports a reference image resource and binds it to the selected image widget", async () => {
+    signInForCloudSaves();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:heart") });
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(projectCreateResponse());
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return Promise.resolve(projectSaveResponse());
+      }
+      if (url === "/api/projects/project-1/assets" && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          asset: {
+            id: "asset-heart",
+            projectId: "project-1",
+            name: "heart.png",
+            kind: "image",
+            mimeType: "image/png",
+            width: 1,
+            height: 1,
+            sizeBytes: 68,
+            objectKey: "projects/project-1/assets/asset-heart/heart.png",
+            createdAt: "2026-05-08T00:00:00Z"
+          }
+        }), { status: 201 }));
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="widget-card-image"]').trigger("click");
+    await wrapper.get('[data-testid="asset-search-input"]').setValue("heart");
+    await wrapper.get('[data-testid="sample-asset-heart-png"]').trigger("click");
+    expect(wrapper.get('[data-testid="import-selected-reference-button"]').text()).toBe("Import Reference");
+
+    await wrapper.get('[data-testid="import-selected-reference-button"]').trigger("click");
+    await flushPromises();
+
+    const uploadRequest = fetchMock.mock.calls.find(([url, init]) => url === "/api/projects/project-1/assets" && init?.method === "POST");
+    expect(uploadRequest).toBeTruthy();
+    expect(wrapper.text()).toContain("heart.png");
+    expect(wrapper.get('[data-testid="image-binding-state"]').text()).toContain("Bound to heart.png");
+    expect(wrapper.get('[data-testid="canvas-widget-image-1"] img').attributes("src")).toBe("blob:heart");
+  });
+
+  it("imports and binds a reference image locally when cloud save is unavailable", async () => {
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:local-heart") });
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="widget-card-image"]').trigger("click");
+    await wrapper.get('[data-testid="asset-search-input"]').setValue("heart");
+    await wrapper.get('[data-testid="sample-asset-heart-png"]').trigger("click");
+    await wrapper.get('[data-testid="import-selected-reference-button"]').trigger("click");
+    await flushPromises();
+
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/projects/project-watch-demo/assets", expect.anything());
+    expect(wrapper.text()).toContain("Asset imported locally: heart.png");
+    expect(wrapper.get('[data-testid="image-binding-state"]').text()).toContain("Bound to heart.png");
+    expect(wrapper.get('[data-testid="canvas-widget-image-1"] img').attributes("src")).toBe("blob:local-heart");
   });
 
   it("selects a resource card and binds an image asset from the assets panel", async () => {
@@ -3878,6 +4328,39 @@ describe("EditorShell", () => {
     wrapper.unmount();
   });
 
+  it("coalesces repeated keyboard nudges into one undo entry per key session", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+
+    await wrapper.get('[data-testid="canvas-widget-time-label"]').trigger("click");
+    const historyBefore = store.historyEntries.length;
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", shiftKey: true }));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore);
+    expect(store.selectedWidget?.layout).toMatchObject({ x: 152, y: 50 });
+
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight" }));
+    await wrapper.vm.$nextTick();
+
+    expect(store.historyEntries).toHaveLength(historyBefore + 1);
+    expect(store.historyEntries.at(-1)?.label).toBe("Move widget");
+
+    store.undo();
+    await wrapper.vm.$nextTick();
+
+    expect(store.selectedWidget?.layout).toMatchObject({ x: 150, y: 40 });
+    wrapper.unmount();
+  });
+
   it("saves the project from the toolbar and reflects save state", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -3989,6 +4472,9 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="simulator-background-button"]').attributes("aria-pressed")).toBe("false");
     expect(wrapper.get('[data-testid="simulator-fullscreen-button"]').attributes("title")).toBe("Open Screen_1 simulator fullscreen");
     expect(wrapper.get('[data-testid="simulator-fullscreen-button"]').attributes("aria-label")).toBe("Open Screen_1 simulator fullscreen");
+    expect(wrapper.get('[data-testid="simulator-runtime-kind"]').text()).toBe("Canvas fallback");
+    expect(wrapper.get('[data-testid="simulator-runtime-kind"]').attributes("aria-label")).toBe("Simulator runtime: Canvas fallback");
+    expect(wrapper.get('[data-testid="simulator-runtime-kind"]').attributes("title")).toBe("Simulator runtime: Canvas fallback");
     expect(wrapper.get('[data-testid="simulator-refresh-button"] svg').attributes("data-icon-name")).toBe("refresh");
     expect(wrapper.get('[data-testid="simulator-screenshot-button"] svg').attributes("data-icon-name")).toBe("camera");
     expect(wrapper.get('[data-testid="simulator-background-button"] svg').attributes("data-icon-name")).toBe("grid");
@@ -4127,6 +4613,23 @@ describe("EditorShell", () => {
     expect(wrapper.text()).toContain("Rendering Screen_2");
   });
 
+  it("relocalizes simulator status messages after switching locale", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="simulator-message"]').text()).toBe("Preview updated");
+
+    await wrapper.get('[data-testid="locale-select"]').setValue("zh-CN");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="simulator-message"]').text()).toBe("预览已更新");
+    expect(wrapper.get('[data-testid="simulator-runtime-kind"]').attributes("title")).toBe("模拟器运行时：画布回退");
+  });
+
   it("writes simulator render failures to the log", async () => {
     signInForCloudSaves();
     const brokenDoc = {
@@ -4185,7 +4688,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="confirm-new-project-button"]').trigger("submit");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("MISSING_ASSET: Missing asset: missing-asset");
+    expect(wrapper.text()).toContain("Missing asset: missing-asset");
   });
 
   it("creates a cloud project from the toolbar", async () => {
@@ -4466,14 +4969,14 @@ describe("EditorShell", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="current-user"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="login-error"]').text()).toBe("invalid credentials");
+    expect(wrapper.get('[data-testid="login-error"]').text()).toBe("Invalid email or password");
     expect(wrapper.get('[data-testid="login-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="login-error"]').attributes("id")).toBe("toolbar-login-error");
     expect(wrapper.get('[data-testid="login-email-input"]').attributes("aria-invalid")).toBe("true");
     expect(wrapper.get('[data-testid="login-email-input"]').attributes("aria-describedby")).toBe("toolbar-login-error");
     expect(wrapper.get('[data-testid="login-password-input"]').attributes("aria-invalid")).toBe("true");
     expect(wrapper.get('[data-testid="login-password-input"]').attributes("aria-describedby")).toBe("toolbar-login-error");
-    expect(wrapper.text()).toContain("Login failed: invalid credentials");
+    expect(wrapper.text()).toContain("Login failed: Invalid email or password");
 
     await wrapper.get('[data-testid="login-password-input"]').setValue("password");
 
@@ -4653,7 +5156,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
     await wrapper.get('[data-testid="target-width-input"]').setValue("0");
 
-    expect(wrapper.get('[data-testid="target-width-error"]').text()).toBe("width must be greater than 0");
+    expect(wrapper.get('[data-testid="target-width-error"]').text()).toBe("Width must be greater than 0");
     expect(wrapper.get('[data-testid="target-width-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="target-width-error"]').attributes("id")).toBe("target-width-error");
     expect(wrapper.get('[data-testid="target-width-input"]').attributes("aria-invalid")).toBe("true");
@@ -4687,8 +5190,8 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="settings-target-height-input"]').setValue("-1");
     await wrapper.get('[data-testid="settings-target-dpi-input"]').setValue("0");
 
-    expect(wrapper.get('[data-testid="settings-target-height-error"]').text()).toBe("height must be greater than 0");
-    expect(wrapper.get('[data-testid="settings-target-dpi-error"]').text()).toBe("dpi must be greater than 0");
+    expect(wrapper.get('[data-testid="settings-target-height-error"]').text()).toBe("Height must be greater than 0");
+    expect(wrapper.get('[data-testid="settings-target-dpi-error"]').text()).toBe("DPI must be greater than 0");
     expect(wrapper.get('[data-testid="settings-target-height-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="settings-target-dpi-error"]').attributes("role")).toBe("alert");
     expect(wrapper.get('[data-testid="settings-target-height-error"]').attributes("id")).toBe("settings-target-height-error");
@@ -4712,7 +5215,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
     await wrapper.get('[data-testid="target-device-name-input"]').setValue("   ");
 
-    expect(wrapper.get('[data-testid="target-device-name-error"]').text()).toBe("deviceName is required");
+    expect(wrapper.get('[data-testid="target-device-name-error"]').text()).toBe("Device name is required");
     expect(store.project.target.deviceName).toBe("ESP32-S3");
 
     await wrapper.get('[data-testid="target-device-name-input"]').setValue("STM32-HMI");
@@ -4722,8 +5225,30 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="canvas-target-settings-button"]').trigger("click");
     await wrapper.get('[data-testid="settings-target-device-name-input"]').setValue("");
 
-    expect(wrapper.get('[data-testid="settings-target-device-name-error"]').text()).toBe("deviceName is required");
+    expect(wrapper.get('[data-testid="settings-target-device-name-error"]').text()).toBe("Device name is required");
     expect(store.project.target.deviceName).toBe("STM32-HMI");
+  });
+
+  it("shows Chinese inspector and target validation errors", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="locale-select"]').setValue("zh-CN");
+    await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
+    await wrapper.get('[data-testid="layout-width-input"]').setValue("0");
+    await wrapper.get('[data-testid="target-device-name-input"]').setValue("   ");
+
+    expect(wrapper.get('[data-testid="layout-width-error"]').text()).toBe("宽度必须大于 0");
+    expect(wrapper.get('[data-testid="target-device-name-error"]').text()).toBe("设备名称不能为空");
+
+    await wrapper.get('[data-testid="widget-card-chart"]').trigger("click");
+    await wrapper.get('[data-testid="inspector-style-tab"]').trigger("click");
+    await wrapper.get('[data-testid="prop-values-input"]').setValue("1, nope");
+
+    expect(wrapper.get('[data-testid="prop-values-error"]').text()).toBe("数值必须使用逗号、空格或换行分隔，且全部为数字");
   });
 
   it("switches inspector tabs between style, events and layout panels", async () => {

@@ -16,8 +16,8 @@
       >
         <IconGlyph name="menu" />
       </button>
-      <strong class="product-name">LVGL Online Editor</strong>
-      <nav class="desktop-menu-strip" aria-label="Application menus">
+      <strong class="product-name">{{ copy.toolbar.productName }}</strong>
+      <nav class="desktop-menu-strip" :aria-label="copy.toolbar.applicationMenus">
         <span v-for="menu in desktopMenus" :key="menu.id" class="desktop-menu-item">
           <button
             type="button"
@@ -62,79 +62,93 @@
       <div v-if="projectMenuOpen" ref="projectMenuRef" class="toolbar-project-menu" role="menu" data-testid="toolbar-project-menu">
         <div class="project-menu-heading">
           <div>
-            <div class="menu-section-title">Project</div>
+            <div class="menu-section-title">{{ copy.toolbar.project }}</div>
             <strong>{{ project.name }}</strong>
           </div>
-          <span data-testid="menu-project-count">{{ selectableProjects.length }} cloud</span>
+          <span data-testid="menu-project-count">{{ copy.toolbar.cloudProjectCount(selectableProjects.length) }}</span>
         </div>
-        <button ref="projectMenuFirstActionRef" class="select-like" type="button" role="menuitem" data-testid="menu-load-projects-button" aria-label="Refresh cloud projects" title="Refresh cloud projects" @click="loadProjectsFromMenu" @keydown="handleProjectMenuItemKeydown">Refresh cloud projects</button>
-        <select class="select-like" role="menuitem" data-testid="menu-project-select" aria-label="Open cloud project from menu" title="Open cloud project from menu" :disabled="selectableProjects.length === 0" :value="project.id" @change="openProject" @keydown="handleProjectMenuItemKeydown">
+        <button ref="projectMenuFirstActionRef" class="select-like" type="button" role="menuitem" data-testid="menu-load-projects-button" :aria-label="copy.toolbar.refreshCloudProjects" :title="copy.toolbar.refreshCloudProjects" @click="loadProjectsFromMenu" @keydown="handleProjectMenuItemKeydown">{{ copy.toolbar.refreshCloudProjects }}</button>
+        <select class="select-like" role="menuitem" data-testid="menu-project-select" :aria-label="copy.toolbar.openCloudProjectFromMenu" :title="copy.toolbar.openCloudProjectFromMenu" :disabled="selectableProjects.length === 0" :value="project.id" @change="openProject" @keydown="handleProjectMenuItemKeydown">
           <option :value="project.id">{{ currentProjectLabel }}</option>
           <option v-for="item in selectableProjects" :key="item.id" :value="item.id">
             {{ projectOptionLabel(item.id, item.name) }}
           </option>
         </select>
+        <label class="project-menu-field" role="none">
+          <span>{{ copy.toolbar.language }}</span>
+          <select class="select-like" role="menuitem" data-menu-skip="true" data-testid="menu-locale-select" :aria-label="copy.toolbar.editorLanguage" :title="copy.toolbar.editorLanguage" :value="localeStore.locale" @change="updateLocale" @keydown="handleProjectMenuItemKeydown">
+            <option value="en-US">{{ copy.toolbar.localeNames["en-US"] }}</option>
+            <option value="zh-CN">{{ copy.toolbar.localeNames["zh-CN"] }}</option>
+          </select>
+        </label>
         <p v-if="selectableProjects.length === 0" class="project-menu-empty" data-testid="menu-project-empty-state" role="status" aria-live="polite" aria-atomic="true">
-          No cloud projects loaded yet.
+          {{ copy.toolbar.noCloudProjects }}
         </p>
-        <button class="select-like" type="button" role="menuitem" data-testid="menu-new-project-button" aria-label="Create cloud project" title="Create cloud project" @click="createProjectFromMenu" @keydown="handleProjectMenuItemKeydown">Create cloud project</button>
+        <button class="select-like" type="button" role="menuitem" data-testid="menu-new-project-button" :aria-label="copy.toolbar.createCloudProject" :title="copy.toolbar.createCloudProject" @click="createProjectFromMenu" @keydown="handleProjectMenuItemKeydown">{{ copy.toolbar.createCloudProject }}</button>
         <form v-if="!authUser" class="project-menu-login-form" data-testid="menu-login-form" @submit.prevent="submitLogin">
-          <input v-model="loginEmail" class="select-like" data-testid="menu-login-email-input" aria-label="Email for cloud login" title="Email for cloud login" placeholder="Email" autocomplete="username" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'project-menu-login-error' : undefined" @input="clearLoginError" @keydown="handleProjectMenuItemKeydown" />
-          <input v-model="loginPassword" class="select-like" data-testid="menu-login-password-input" aria-label="Password for cloud login" title="Password for cloud login" placeholder="Password" type="password" autocomplete="current-password" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'project-menu-login-error' : undefined" @input="clearLoginError" @keydown="handleProjectMenuItemKeydown" />
-          <button class="select-like" type="submit" data-testid="menu-login-button" aria-label="Log in from project menu" title="Log in from project menu" @keydown="handleProjectMenuItemKeydown">Login</button>
+          <input v-model="loginEmail" class="select-like" data-testid="menu-login-email-input" :aria-label="copy.toolbar.emailForCloudLogin" :title="copy.toolbar.emailForCloudLogin" :placeholder="copy.toolbar.email" autocomplete="username" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'project-menu-login-error' : undefined" @input="clearLoginError" @keydown="handleProjectMenuItemKeydown" />
+          <input v-model="loginPassword" class="select-like" data-testid="menu-login-password-input" :aria-label="copy.toolbar.passwordForCloudLogin" :title="copy.toolbar.passwordForCloudLogin" :placeholder="copy.toolbar.password" type="password" autocomplete="current-password" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'project-menu-login-error' : undefined" @input="clearLoginError" @keydown="handleProjectMenuItemKeydown" />
+          <button class="select-like" type="submit" data-testid="menu-login-button" :aria-label="copy.toolbar.loginFromProjectMenu" :title="copy.toolbar.loginFromProjectMenu" @keydown="handleProjectMenuItemKeydown">{{ copy.toolbar.login }}</button>
           <p v-if="authError" id="project-menu-login-error" class="login-error project-menu-login-error" data-testid="menu-login-error" role="alert">{{ authError }}</p>
         </form>
-        <button v-if="!authUser" class="select-like" type="button" role="menuitem" data-testid="menu-demo-login-button" aria-label="Use demo account" title="Use demo account" @click="demoLoginFromMenu" @keydown="handleProjectMenuItemKeydown">Demo Login</button>
+        <button v-if="!authUser" class="select-like" type="button" role="menuitem" data-testid="menu-demo-login-button" :aria-label="copy.toolbar.loginWithDemoAccount" :title="copy.toolbar.loginWithDemoAccount" @click="demoLoginFromMenu" @keydown="handleProjectMenuItemKeydown">{{ copy.toolbar.demoLogin }}</button>
       </div>
     </div>
     <div class="command-bar">
       <div class="command-group">
-        <button class="tool-button" type="button" data-testid="new-project-button" aria-label="New project" title="New project" @click="emit('create-project')"><IconGlyph name="add" /><span class="tool-label">New</span></button>
-        <button class="tool-button" type="button" data-testid="load-projects-button" aria-label="Open cloud project" title="Open cloud project" @click="emit('load-projects')"><IconGlyph name="folder" /><span class="tool-label">Open</span></button>
-        <button class="tool-button" type="button" data-testid="save-project-button" :aria-label="saveProjectLabel" :title="saveProjectLabel" @click="emit('save-project')"><IconGlyph name="save" /><span class="tool-label">Save</span></button>
+        <button class="tool-button" type="button" data-testid="new-project-button" :aria-label="copy.toolbar.newProjectA11y" :title="copy.toolbar.newProjectA11y" @click="emit('create-project')"><IconGlyph name="add" /><span class="tool-label">{{ copy.toolbar.newProject }}</span></button>
+        <button class="tool-button" type="button" data-testid="load-projects-button" :aria-label="copy.toolbar.openCloudProject" :title="copy.toolbar.openCloudProject" @click="emit('load-projects')"><IconGlyph name="folder" /><span class="tool-label">{{ copy.toolbar.open }}</span></button>
+        <button class="tool-button" type="button" data-testid="save-project-button" :aria-label="saveProjectLabel" :title="saveProjectLabel" @click="emit('save-project')"><IconGlyph name="save" /><span class="tool-label">{{ copy.toolbar.save }}</span></button>
       </div>
       <div class="command-group">
-        <button class="tool-button" type="button" data-testid="undo-button" aria-label="Undo" title="Undo" :disabled="!canUndo" @click="emit('undo')"><IconGlyph name="undo" /><span class="tool-label">Undo</span></button>
-        <button class="tool-button" type="button" data-testid="redo-button" aria-label="Redo" title="Redo" :disabled="!canRedo" @click="emit('redo')"><IconGlyph name="redo" /><span class="tool-label">Redo</span></button>
-        <button class="tool-button" type="button" :aria-label="copyWidgetLabel" :title="copyWidgetLabel" data-testid="copy-widget-button" :disabled="!canCopyWidget" @click="emit('copy-widget')"><IconGlyph name="copy" /><span class="tool-label">Copy</span></button>
-        <button class="tool-button" type="button" :aria-label="pasteWidgetLabel" :title="pasteWidgetLabel" data-testid="paste-widget-button" :disabled="!canPasteWidget" @click="emit('paste-widget')"><IconGlyph name="paste" /><span class="tool-label">Paste</span></button>
-        <button class="tool-button" type="button" :aria-label="deleteWidgetLabel" :title="deleteWidgetLabel" data-testid="delete-widget-button" :disabled="!canDeleteWidget" @click="emit('delete-widget')"><IconGlyph name="trash" /><span class="tool-label">Delete</span></button>
+        <button class="tool-button" type="button" data-testid="undo-button" :aria-label="copy.toolbar.undo" :title="copy.toolbar.undo" :disabled="!canUndo" @click="emit('undo')"><IconGlyph name="undo" /><span class="tool-label">{{ copy.toolbar.undo }}</span></button>
+        <button class="tool-button" type="button" data-testid="redo-button" :aria-label="copy.toolbar.redo" :title="copy.toolbar.redo" :disabled="!canRedo" @click="emit('redo')"><IconGlyph name="redo" /><span class="tool-label">{{ copy.toolbar.redo }}</span></button>
+        <button class="tool-button" type="button" :aria-label="copyWidgetLabel" :title="copyWidgetLabel" data-testid="copy-widget-button" :disabled="!canCopyWidget" @click="emit('copy-widget')"><IconGlyph name="copy" /><span class="tool-label">{{ copy.toolbar.copy }}</span></button>
+        <button class="tool-button" type="button" :aria-label="pasteWidgetLabel" :title="pasteWidgetLabel" data-testid="paste-widget-button" :disabled="!canPasteWidget" @click="emit('paste-widget')"><IconGlyph name="paste" /><span class="tool-label">{{ copy.toolbar.paste }}</span></button>
+        <button class="tool-button" type="button" :aria-label="deleteWidgetLabel" :title="deleteWidgetLabel" data-testid="delete-widget-button" :disabled="!canDeleteWidget" @click="emit('delete-widget')"><IconGlyph name="trash" /><span class="tool-label">{{ copy.toolbar.delete }}</span></button>
       </div>
       <div class="command-group compact-tools">
         <button class="icon-button" type="button" :aria-label="gridToggleLabel" :title="gridToggleLabel" data-testid="grid-toggle" :aria-pressed="gridEnabled ? 'true' : 'false'" :class="{ active: gridEnabled }" @click="emit('update:grid-enabled', !gridEnabled)"><IconGlyph name="grid" /></button>
         <button class="icon-button" type="button" :aria-label="snapToggleLabel" :title="snapToggleLabel" data-testid="snap-toggle" :aria-pressed="snapEnabled ? 'true' : 'false'" :class="{ active: snapEnabled }" @click="emit('update:snap-enabled', !snapEnabled)"><IconGlyph name="crosshair" /></button>
       </div>
       <span class="toolbar-spacer" />
-      <button class="simulator-toggle simulator-visibility-control" type="button" data-testid="simulator-toggle-button" :aria-pressed="simulatorVisible ? 'true' : 'false'" :aria-label="simulatorVisible ? 'Hide simulator' : 'Show simulator'" :title="simulatorVisible ? 'Hide simulator' : 'Show simulator'" @click="emit('toggle-simulator')">
-        {{ simulatorVisible ? "Simulator" : "Show Sim" }}
+      <button class="simulator-toggle simulator-visibility-control" type="button" data-testid="simulator-toggle-button" :aria-pressed="simulatorVisible ? 'true' : 'false'" :aria-label="simulatorVisibilityLabel" :title="simulatorVisibilityLabel" @click="emit('toggle-simulator')">
+        {{ simulatorVisible ? copy.toolbar.simulator : copy.toolbar.simulatorShow }}
       </button>
-      <button class="primary-action" type="button" data-testid="preview-button" aria-label="Preview current screen" title="Preview current screen" @click="emit('preview')">Preview</button>
+      <button class="primary-action" type="button" data-testid="preview-button" :aria-label="copy.toolbar.previewCurrentScreen" :title="copy.toolbar.previewCurrentScreen" @click="emit('preview')">{{ copy.toolbar.preview }}</button>
       <label class="project-control">
-        Project
+        {{ copy.toolbar.project }}
         <input
           class="select-like toolbar-input"
           data-testid="project-name-input"
-          aria-label="Project name"
-          title="Project name"
+          :aria-label="copy.toolbar.projectName"
+          :title="copy.toolbar.projectName"
           :value="project.name"
           @input="emit('rename-project', ($event.target as HTMLInputElement).value)"
         />
       </label>
-      <select class="select-like project-select cloud-project-control" data-testid="project-select" aria-label="Open cloud project" title="Open cloud project" :value="project.id" @change="openProject">
+      <select class="select-like project-select cloud-project-control" data-testid="project-select" :aria-label="copy.toolbar.openCloudProject" :title="copy.toolbar.openCloudProject" :value="project.id" @change="openProject">
         <option :value="project.id">{{ projectOptionLabel(project.id, project.name) }}</option>
         <option v-for="item in selectableProjects" :key="item.id" :value="item.id">
           {{ projectOptionLabel(item.id, item.name) }}
         </option>
       </select>
       <label>
-        Target
-        <button class="select-like" type="button" data-testid="target-settings-button" :aria-label="`Open target settings for ${targetLabel}`" :title="`Open target settings for ${targetLabel}`" @click="emit('show-settings')">{{ targetLabel }} ˅</button>
+        {{ copy.toolbar.target }}
+        <button class="select-like" type="button" data-testid="target-settings-button" :aria-label="copy.toolbar.openTargetSettingsFor(targetLabel)" :title="copy.toolbar.openTargetSettingsFor(targetLabel)" @click="emit('show-settings')">{{ targetLabel }} ˅</button>
       </label>
       <label>
-        Theme
-        <select class="select-like" data-testid="theme-select" aria-label="Project theme" title="Project theme" :value="project.theme" @change="updateTheme">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
+        {{ copy.toolbar.theme }}
+        <select class="select-like" data-testid="theme-select" :aria-label="copy.toolbar.projectTheme" :title="copy.toolbar.projectTheme" :value="project.theme" @change="updateTheme">
+          <option value="dark">{{ copy.toolbar.dark }}</option>
+          <option value="light">{{ copy.toolbar.light }}</option>
+        </select>
+      </label>
+      <label class="locale-control">
+        {{ copy.toolbar.language }}
+        <select class="select-like locale-select" data-testid="locale-select" :aria-label="copy.toolbar.editorLanguage" :title="copy.toolbar.editorLanguage" :value="localeStore.locale" @change="updateLocale">
+          <option value="en-US">{{ copy.toolbar.localeNames["en-US"] }}</option>
+          <option value="zh-CN">{{ copy.toolbar.localeNames["zh-CN"] }}</option>
         </select>
       </label>
       <button
@@ -149,15 +163,15 @@
         {{ buildButtonLabel }}
       </button>
       <form v-if="!authUser" class="login-form" @submit.prevent="submitLogin">
-        <input v-model="loginEmail" class="select-like login-input" data-testid="login-email-input" aria-label="Email" title="Email" placeholder="Email" autocomplete="username" size="1" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'toolbar-login-error' : undefined" @input="clearLoginError" />
-        <input v-model="loginPassword" class="select-like login-input" data-testid="login-password-input" aria-label="Password" title="Password" placeholder="Password" type="password" autocomplete="current-password" size="1" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'toolbar-login-error' : undefined" @input="clearLoginError" />
-        <button class="select-like" data-testid="login-button" type="submit" aria-label="Log in" title="Log in">Login</button>
-        <button class="select-like" data-testid="demo-login-button" type="button" aria-label="Use demo account" title="Use demo account" @click="emit('demo-login')">Demo</button>
+        <input v-model="loginEmail" class="select-like login-input" data-testid="login-email-input" :aria-label="copy.toolbar.email" :title="copy.toolbar.email" :placeholder="copy.toolbar.email" autocomplete="username" size="1" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'toolbar-login-error' : undefined" @input="clearLoginError" />
+        <input v-model="loginPassword" class="select-like login-input" data-testid="login-password-input" :aria-label="copy.toolbar.password" :title="copy.toolbar.password" :placeholder="copy.toolbar.password" type="password" autocomplete="current-password" size="1" :aria-invalid="authError ? 'true' : undefined" :aria-describedby="authError ? 'toolbar-login-error' : undefined" @input="clearLoginError" />
+        <button class="select-like" data-testid="login-button" type="submit" :aria-label="copy.toolbar.login" :title="copy.toolbar.login">{{ copy.toolbar.login }}</button>
+        <button class="select-like" data-testid="demo-login-button" type="button" :aria-label="copy.toolbar.loginWithDemoAccount" :title="copy.toolbar.loginWithDemoAccount" @click="emit('demo-login')">{{ copy.toolbar.demo }}</button>
         <p v-if="authError" id="toolbar-login-error" class="login-error" data-testid="login-error" role="alert">{{ authError }}</p>
       </form>
       <span v-else class="user-chip" data-testid="current-user">
         {{ authUser.displayName }}
-        <button class="mini-action" data-testid="logout-button" type="button" aria-label="Logout" title="Logout" @click="emit('logout')"><IconGlyph name="logout" /></button>
+        <button class="mini-action" data-testid="logout-button" type="button" :aria-label="copy.toolbar.logout" :title="copy.toolbar.logout" @click="emit('logout')"><IconGlyph name="logout" /></button>
       </span>
     </div>
   </header>
@@ -168,6 +182,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import type { ProjectDoc } from "@hiveton-lvgl/schema";
 import type { AuthUser } from "../api/auth";
 import type { ProjectSummary } from "../api/projects";
+import { isLocale } from "../i18n/copy";
+import { useCopy } from "../i18n/useCopy";
+import { useLocaleStore } from "../stores/locale";
 import IconGlyph from "./IconGlyph.vue";
 
 const props = defineProps<{
@@ -216,6 +233,8 @@ const emit = defineEmits<{
 
 const loginEmail = ref("demo@hiveton.dev");
 const loginPassword = ref("password");
+const localeStore = useLocaleStore();
+const copy = useCopy();
 const projectMenuOpen = ref(false);
 const activeDesktopMenu = ref<DesktopMenuId | null>(null);
 const hoverActivatedDesktopMenu = ref<DesktopMenuId | null>(null);
@@ -228,29 +247,30 @@ const desktopMenuCommandRefs = ref<Partial<Record<DesktopMenuId, Record<string, 
 const isBuildBusy = computed(() => props.buildStatus === "saving" || props.buildStatus === "queued" || props.buildStatus === "running");
 const buildDisabled = computed(() => !props.canBuildProject || isBuildBusy.value);
 const copyWidgetLabel = computed(() =>
-  props.selectedWidgetName ? `Copy ${props.selectedWidgetName} widget` : "Copy selected widget"
+  props.selectedWidgetName ? copy.value.toolbar.copyWidget(props.selectedWidgetName) : copy.value.toolbar.copySelectedWidget
 );
 const pasteWidgetLabel = computed(() =>
-  props.copiedWidgetName ? `Paste ${props.copiedWidgetName} widget` : "Paste copied widget"
+  props.copiedWidgetName ? copy.value.toolbar.pasteWidget(props.copiedWidgetName) : copy.value.toolbar.pasteCopiedWidget
 );
 const deleteWidgetLabel = computed(() =>
-  props.selectedWidgetName ? `Delete ${props.selectedWidgetName} widget` : "Delete selected widget"
+  props.selectedWidgetName ? copy.value.toolbar.deleteWidget(props.selectedWidgetName) : copy.value.toolbar.deleteSelectedWidget
 );
-const saveProjectLabel = computed(() => `Save ${props.project.name} project`);
-const gridToggleLabel = computed(() => (props.gridEnabled ? "Hide Grid" : "Show Grid"));
-const snapToggleLabel = computed(() => (props.snapEnabled ? "Disable Snap" : "Enable Snap"));
+const saveProjectLabel = computed(() => copy.value.toolbar.saveProject(props.project.name));
+const gridToggleLabel = computed(() => (props.gridEnabled ? copy.value.toolbar.gridHide : copy.value.toolbar.gridShow));
+const snapToggleLabel = computed(() => (props.snapEnabled ? copy.value.toolbar.snapDisable : copy.value.toolbar.snapEnable));
+const simulatorVisibilityLabel = computed(() => (props.simulatorVisible ? copy.value.toolbar.hideSimulator : copy.value.toolbar.showSimulator));
 const buildButtonLabel = computed(() => {
   if (!props.canBuildProject) {
-    return "Login to Build";
+    return copy.value.toolbar.loginToBuild;
   }
-  return isBuildBusy.value ? "Building..." : "Build";
+  return isBuildBusy.value ? copy.value.toolbar.building : copy.value.toolbar.build;
 });
 const buildButtonTitle = computed(() =>
-  props.canBuildProject ? "Build LVGL C export" : "Sign in to build and export LVGL C code"
+  props.canBuildProject ? copy.value.toolbar.buildCExport : copy.value.toolbar.signInToBuild
 );
 const selectableProjects = computed(() => props.projects.filter((item) => item.id !== props.project.id));
-const currentProjectLabel = computed(() => `Current: ${projectOptionLabel(props.project.id, props.project.name)}`);
-const projectMenuButtonLabel = computed(() => projectMenuOpen.value ? "Project menu open" : "Open project menu");
+const currentProjectLabel = computed(() => copy.value.toolbar.currentProject(projectOptionLabel(props.project.id, props.project.name)));
+const projectMenuButtonLabel = computed(() => projectMenuOpen.value ? copy.value.toolbar.projectMenuOpen : copy.value.toolbar.openProjectMenu);
 const duplicateProjectNames = computed(() => {
   const counts = new Map<string, number>();
   for (const item of [{ id: props.project.id, name: props.project.name }, ...selectableProjects.value]) {
@@ -297,69 +317,69 @@ type DesktopMenu = {
 const desktopMenus = computed<DesktopMenu[]>(() => [
   {
     id: "file",
-    label: "File",
+    label: copy.value.toolbar.file,
     items: [
-      { id: "new", label: "New Project", action: "create-project", shortcut: "⌘N" },
-      { id: "open", label: "Open Cloud Project", action: "load-projects", shortcut: "⌘O" },
-      { id: "save", label: "Save", action: "save-project", shortcut: "⌘S" },
+      { id: "new", label: copy.value.toolbar.newProject, action: "create-project", shortcut: "⌘N" },
+      { id: "open", label: copy.value.toolbar.openCloudProject, action: "load-projects", shortcut: "⌘O" },
+      { id: "save", label: copy.value.toolbar.save, action: "save-project", shortcut: "⌘S" },
       { id: "file-separator", kind: "divider" },
-      { id: "build", label: props.canBuildProject ? "Build" : "Login to Build", action: "build", disabled: buildDisabled.value }
+      { id: "build", label: props.canBuildProject ? copy.value.toolbar.build : copy.value.toolbar.loginToBuild, action: "build", disabled: buildDisabled.value }
     ]
   },
   {
     id: "edit",
-    label: "Edit",
+    label: copy.value.toolbar.edit,
     items: [
-      { id: "undo", label: "Undo", action: "undo", shortcut: "⌘Z", disabled: !props.canUndo },
-      { id: "redo", label: "Redo", action: "redo", shortcut: "⇧⌘Z", disabled: !props.canRedo },
+      { id: "undo", label: copy.value.toolbar.undo, action: "undo", shortcut: "⌘Z", disabled: !props.canUndo },
+      { id: "redo", label: copy.value.toolbar.redo, action: "redo", shortcut: "⇧⌘Z", disabled: !props.canRedo },
       { id: "edit-separator", kind: "divider" },
-      { id: "copy", label: "Copy", action: "copy-widget", shortcut: "⌘C", disabled: !props.canCopyWidget },
-      { id: "paste", label: "Paste", action: "paste-widget", shortcut: "⌘V", disabled: !props.canPasteWidget },
-      { id: "delete", label: "Delete", action: "delete-widget", shortcut: "⌫", disabled: !props.canDeleteWidget }
+      { id: "copy", label: copy.value.toolbar.copy, action: "copy-widget", shortcut: "⌘C", disabled: !props.canCopyWidget },
+      { id: "paste", label: copy.value.toolbar.paste, action: "paste-widget", shortcut: "⌘V", disabled: !props.canPasteWidget },
+      { id: "delete", label: copy.value.toolbar.delete, action: "delete-widget", shortcut: "⌫", disabled: !props.canDeleteWidget }
     ]
   },
   {
     id: "view",
-    label: "View",
+    label: copy.value.toolbar.view,
     items: [
-      { id: "preview", label: "Preview", action: "preview" },
-      { id: "simulator", label: props.simulatorVisible ? "Hide Simulator" : "Show Simulator", action: "toggle-simulator" },
+      { id: "preview", label: copy.value.toolbar.preview, action: "preview" },
+      { id: "simulator", label: props.simulatorVisible ? copy.value.toolbar.hideSimulator : copy.value.toolbar.showSimulator, action: "toggle-simulator" },
       { id: "view-separator", kind: "divider" },
-      { id: "grid", label: props.gridEnabled ? "Hide Grid" : "Show Grid", action: "toggle-grid" },
-      { id: "snap", label: props.snapEnabled ? "Disable Snap" : "Enable Snap", action: "toggle-snap" }
+      { id: "grid", label: props.gridEnabled ? copy.value.toolbar.gridHide : copy.value.toolbar.gridShow, action: "toggle-grid" },
+      { id: "snap", label: props.snapEnabled ? copy.value.toolbar.snapDisable : copy.value.toolbar.snapEnable, action: "toggle-snap" }
     ]
   },
   {
     id: "project",
-    label: "Project",
+    label: copy.value.toolbar.project,
     items: [
-      { id: "project-settings", label: "Target Settings", action: "show-settings" },
-      { id: "project-save", label: "Save Project", action: "save-project", shortcut: "⌘S" },
-      { id: "project-open", label: "Load Cloud Projects", action: "load-projects" }
+      { id: "project-settings", label: copy.value.toolbar.targetSettings, action: "show-settings" },
+      { id: "project-save", label: copy.value.toolbar.saveProjectMenu, action: "save-project", shortcut: "⌘S" },
+      { id: "project-open", label: copy.value.toolbar.refreshCloudProjects, action: "load-projects" }
     ]
   },
   {
     id: "tools",
-    label: "Tools",
+    label: copy.value.toolbar.tools,
     items: [
-      { id: "tools-grid", label: props.gridEnabled ? "Grid Enabled" : "Grid Disabled", action: "toggle-grid" },
-      { id: "tools-snap", label: props.snapEnabled ? "Snap Enabled" : "Snap Disabled", action: "toggle-snap" }
+      { id: "tools-grid", label: props.gridEnabled ? copy.value.toolbar.gridEnabled : copy.value.toolbar.gridDisabled, action: "toggle-grid" },
+      { id: "tools-snap", label: props.snapEnabled ? copy.value.toolbar.snapEnabled : copy.value.toolbar.snapDisabled, action: "toggle-snap" }
     ]
   },
   {
     id: "export",
-    label: "Export",
+    label: copy.value.toolbar.export,
     items: [
-      { id: "export-build", label: props.canBuildProject ? "Build C Export" : "Login to Build", action: "build", disabled: buildDisabled.value },
-      { id: "export-preview", label: "Preview Before Export", action: "preview" }
+      { id: "export-build", label: props.canBuildProject ? copy.value.toolbar.buildCExport : copy.value.toolbar.buildCExportSignedOut, action: "build", disabled: buildDisabled.value },
+      { id: "export-preview", label: copy.value.toolbar.previewBeforeExport, action: "preview" }
     ]
   },
   {
     id: "help",
-    label: "Help",
+    label: copy.value.toolbar.help,
     items: [
-      { id: "help-demo-login", label: props.authUser ? "Demo Account Connected" : "Login With Demo Account", action: "demo-login", disabled: Boolean(props.authUser) },
-      { id: "help-settings", label: "Open Settings", action: "show-settings" }
+      { id: "help-demo-login", label: props.authUser ? copy.value.toolbar.demoAccountConnected : copy.value.toolbar.loginWithDemoAccount, action: "demo-login", disabled: Boolean(props.authUser) },
+      { id: "help-settings", label: copy.value.navigation.openSection(copy.value.navigation.settings), action: "show-settings" }
     ]
   }
 ]);
@@ -394,7 +414,7 @@ function setDesktopMenuCommandRef(menuId: DesktopMenuId, itemId: string, element
 }
 
 function desktopMenuButtonLabel(menu: DesktopMenu): string {
-  return activeDesktopMenu.value === menu.id ? `${menu.label} menu open` : `Open ${menu.label} menu`;
+  return activeDesktopMenu.value === menu.id ? copy.value.toolbar.menuOpen(menu.label) : copy.value.toolbar.openMenu(menu.label);
 }
 
 function openProject(event: Event): void {
@@ -414,6 +434,13 @@ function updateTheme(event: Event): void {
   const theme = (event.target as HTMLSelectElement).value;
   if (theme === "dark" || theme === "light") {
     emit("update-theme", theme);
+  }
+}
+
+function updateLocale(event: Event): void {
+  const nextLocale = (event.target as HTMLSelectElement).value;
+  if (isLocale(nextLocale)) {
+    localeStore.setLocale(nextLocale);
   }
 }
 
@@ -475,7 +502,7 @@ function handleProjectMenuItemKeydown(event: KeyboardEvent): void {
 
 function projectMenuItems(): HTMLElement[] {
   return Array.from(projectMenuRef.value?.querySelectorAll<HTMLElement>("button, input, select") ?? [])
-    .filter((item) => !isDisabledControl(item));
+    .filter((item) => !isDisabledControl(item) && item.dataset.menuSkip !== "true");
 }
 
 function isDisabledControl(item: HTMLElement): boolean {

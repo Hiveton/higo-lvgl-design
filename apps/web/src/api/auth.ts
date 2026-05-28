@@ -1,3 +1,5 @@
+import { apiError } from "./errors";
+
 export type AuthUser = {
   id: string;
   email: string;
@@ -7,13 +9,6 @@ export type AuthUser = {
 export type LoginResponse = {
   token: string;
   user: AuthUser;
-};
-
-type ErrorPayload = {
-  error?: {
-    code?: string;
-    message?: string;
-  };
 };
 
 const tokenKey = "lvgl-editor-token";
@@ -28,7 +23,7 @@ export async function login(email: string, password: string): Promise<LoginRespo
     body: JSON.stringify({ email, password })
   });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, `login failed with status ${response.status}`));
+    throw await apiError(response, "LOGIN_FAILED", `login failed with status ${response.status}`);
   }
   const payload = (await response.json()) as LoginResponse;
   setAuthToken(payload.token);
@@ -41,7 +36,7 @@ export async function getCurrentUser(): Promise<AuthUser> {
   });
   if (!response.ok) {
     clearAuthToken();
-    throw new Error(`current user lookup failed with status ${response.status}`);
+    throw await apiError(response, "CURRENT_USER_LOOKUP_FAILED", `current user lookup failed with status ${response.status}`);
   }
   return response.json() as Promise<AuthUser>;
 }
@@ -102,13 +97,4 @@ export function authHeaders(extra: Record<string, string> = {}): Record<string, 
     ...extra,
     Authorization: `Bearer ${token}`
   };
-}
-
-async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = (await response.clone().json()) as ErrorPayload;
-    return payload.error?.message || fallback;
-  } catch {
-    return fallback;
-  }
 }

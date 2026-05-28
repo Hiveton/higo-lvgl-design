@@ -2,9 +2,11 @@ import { setActivePinia, createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAuthToken, getAuthToken, setAuthToken } from "../api/auth";
 import { useAuthStore } from "./auth";
+import { useLocaleStore } from "./locale";
 
 describe("useAuthStore", () => {
   beforeEach(() => {
+    localStorage.clear();
     setActivePinia(createPinia());
   });
 
@@ -61,7 +63,7 @@ describe("useAuthStore", () => {
     expect(getAuthToken()).toBeNull();
   });
 
-  it("surfaces login API error messages", async () => {
+  it("surfaces localized login API errors", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -78,6 +80,27 @@ describe("useAuthStore", () => {
     await store.loginWithCredentials("demo@hiveton.dev", "wrong-password");
 
     expect(store.user).toBeNull();
-    expect(store.error).toBe("invalid credentials");
+    expect(store.error).toBe("Invalid email or password");
+  });
+
+  it("surfaces login API errors in Chinese when the locale is Chinese", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: { code: "INVALID_CREDENTIALS", message: "invalid credentials" }
+          }),
+          { status: 401 }
+        )
+      )
+    );
+    useLocaleStore().setLocale("zh-CN");
+    const store = useAuthStore();
+
+    await store.loginWithCredentials("demo@hiveton.dev", "wrong-password");
+
+    expect(store.user).toBeNull();
+    expect(store.error).toBe("邮箱或密码无效");
   });
 });

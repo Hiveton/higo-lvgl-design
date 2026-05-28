@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useJobsStore } from "./jobs";
+import { useLocaleStore } from "./locale";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -8,6 +9,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  localStorage.clear();
   setActivePinia(createPinia());
 });
 
@@ -75,5 +77,39 @@ describe("useJobsStore", () => {
     expect(fetchMock).toHaveBeenCalledTimes(11);
     expect(store.buildStatus).toBe("failed");
     expect(store.logEntries.map((entry) => entry.message)).toContain("Export job timed out after 10 polls");
+  });
+
+  it("localizes job status, known backend logs and job error codes in Chinese", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ jobId: "job-failed" }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        job: {
+          id: "job-failed",
+          status: "failed",
+          logs: [
+            { time: "2026-05-08T00:00:00Z", level: "info", message: "Build started" },
+            { time: "2026-05-08T00:00:01Z", level: "info", message: "Generating code" }
+          ],
+          error: { code: "CODEGEN_FAILED", message: "unsupported widget type: unknown" }
+        }
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    useLocaleStore().setLocale("zh-CN");
+    const store = useJobsStore();
+
+    const run = store.startExport("project-1");
+    await vi.advanceTimersByTimeAsync(500);
+    await run;
+
+    expect(store.buildStatus).toBe("failed");
+    expect(store.logEntries.map((entry) => entry.message)).toEqual([
+      "任务状态：排队中",
+      "任务状态：失败",
+      "代码生成失败",
+      "构建已开始",
+      "正在生成代码"
+    ]);
+    expect(store.logEntries.map((entry) => entry.message).join("\n")).not.toContain("unsupported widget type");
   });
 });

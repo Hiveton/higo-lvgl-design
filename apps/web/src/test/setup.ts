@@ -1,4 +1,18 @@
+import { Blob as NodeBlob, File as NodeFile } from "node:buffer";
+
 const testStorage = createMemoryStorage();
+
+Object.defineProperty(globalThis, "Blob", {
+  configurable: true,
+  writable: true,
+  value: NodeBlob
+});
+
+Object.defineProperty(globalThis, "File", {
+  configurable: true,
+  writable: true,
+  value: NodeFile
+});
 
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
@@ -7,6 +21,18 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 if (typeof window !== "undefined") {
+  Object.defineProperty(window, "Blob", {
+    configurable: true,
+    writable: true,
+    value: NodeBlob
+  });
+
+  Object.defineProperty(window, "File", {
+    configurable: true,
+    writable: true,
+    value: NodeFile
+  });
+
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     writable: true,

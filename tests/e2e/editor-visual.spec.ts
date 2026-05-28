@@ -69,6 +69,27 @@ test("preview and build log browser smoke", async ({ page }) => {
   await expect(page.getByTestId("download-export-button")).toBeVisible();
 });
 
+test("Chinese chrome updates document language and keeps the shell fitted", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  await expect(page).toHaveTitle("LVGL Online Editor");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+  await page.getByTestId("locale-select").selectOption("zh-CN");
+
+  await expect(page).toHaveTitle("LVGL 在线编辑器");
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.getByTestId("preview-button")).toHaveText("预览");
+  await expect(page.getByTestId("build-button")).toHaveText("登录后构建");
+  await expect(page.getByTestId("widget-search-input")).toHaveAttribute("placeholder", "搜索控件...");
+  await expect(page.getByTestId("status-save-dot")).toHaveAttribute("title", "保存状态：所有更改已保存");
+  await expect(page.getByTestId("simulator-runtime-kind")).toHaveAttribute("title", /模拟器运行时：(画布回退|LVGL WASM)/);
+  await expectNoHorizontalOverflow(page);
+  await expectToolbarFitsDesignHeader(page);
+  await expectInspectorInputsFit(page);
+});
+
 test("compact toolbar keeps cloud project controls accessible", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -157,6 +178,27 @@ test("tablet viewport keeps core toolbar actions visible", async ({ page }) => {
   await expectNoHorizontalOverflow(page);
 });
 
+for (const viewport of [
+  { width: 599, height: 720 },
+  { width: 768, height: 720 },
+  { width: 1024, height: 768 }
+]) {
+  test(`compact viewport has no editor shell clipping at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    await expectNoHorizontalOverflow(page);
+    await expectEditorShellNoHorizontalClip(page);
+
+    await page.getByTestId("resources-nav-button").click();
+    await expect(page.getByTestId("resources-panel")).toHaveClass(/active/);
+    await expectEditorShellNoHorizontalClip(page);
+
+    await page.getByTestId("bottom-timeline-tab").click();
+    await expectEditorShellNoHorizontalClip(page);
+  });
+}
+
 test("tablet resources view keeps the dock inside the viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
@@ -197,6 +239,21 @@ test("tablet resources view keeps the dock inside the viewport", async ({ page }
   expect(simulatorToolbar.buttons.every((button) => button.width >= 28 && button.height >= 28)).toBe(true);
   expect(simulatorToolbar.buttons.every((button) => button.hitTarget === button.testId)).toBe(true);
 });
+
+for (const viewport of [
+  { width: 1279, height: 720 },
+  { width: 1280, height: 720 }
+]) {
+  test(`resources list has no horizontal overflow at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    await page.getByTestId("resources-nav-button").click();
+    await expect(page.getByTestId("resources-panel")).toHaveClass(/active/);
+    await expectNoHorizontalOverflow(page);
+    await expectEditorShellNoHorizontalClip(page);
+  });
+}
 
 test("tablet viewport exposes inspector editing panel", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -536,10 +593,13 @@ test("simulator panel exposes compact action controls", async ({ page }) => {
   await expect(page.getByTestId("simulator-screenshot-button")).toBeVisible();
   await expect(page.getByTestId("simulator-background-button")).toBeVisible();
   await expect(page.getByTestId("simulator-fullscreen-button")).toBeVisible();
+  await expect(page.getByTestId("simulator-runtime-kind")).toHaveText(/^(Canvas fallback|LVGL WASM)$/);
+  await expect(page.getByTestId("simulator-runtime-kind")).toHaveAttribute("title", /Simulator runtime: (Canvas fallback|LVGL WASM)/);
 
   const result = await page.evaluate(() => {
     const panel = document.querySelector<HTMLElement>('[data-testid="simulator-panel"]');
     const toolbar = document.querySelector<HTMLElement>('[data-testid="simulator-actions"]');
+    const runtime = document.querySelector<HTMLElement>('[data-testid="simulator-runtime-kind"]');
     if (!panel || !toolbar) {
       throw new Error("Missing simulator panel or action toolbar");
     }
@@ -558,11 +618,13 @@ test("simulator panel exposes compact action controls", async ({ page }) => {
     return {
       toolbarRight: toolbarRect.right,
       panelRight: panelRect.right,
+      runtimeRight: runtime?.getBoundingClientRect().right ?? 0,
       buttons
     };
   });
 
   expect(result.toolbarRight).toBeLessThanOrEqual(result.panelRight + 1);
+  expect(result.runtimeRight).toBeLessThanOrEqual(result.panelRight + 1);
   expect(result.buttons.map((button) => button.iconName)).toEqual(["refresh", "camera", "grid", "fullscreen"]);
   expect(result.buttons.every((button) => button.width >= 28 && button.height >= 28)).toBe(true);
   expect(result.buttons.every((button) => button.right <= result.panelRight + 1)).toBe(true);
@@ -865,6 +927,42 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 2);
 }
 
+async function expectEditorShellNoHorizontalClip(page: Page): Promise<void> {
+  const overflow = await page.evaluate(() => {
+    const selectors = [
+      ".editor-shell",
+      ".workspace",
+      ".center-region",
+      ".canvas-toolbar",
+      ".bottom-dock",
+      '[data-testid="resources-panel"]',
+      '[data-testid="asset-list-header"]',
+      '[data-testid="console-list-header"]',
+      '[data-testid="timeline-list-header"]',
+      '[data-testid="timeline-list"]'
+    ];
+    return selectors
+      .map((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element || !element.checkVisibility()) {
+          return null;
+        }
+        if ((selector === '[data-testid="resources-panel"]' || selector === '[data-testid="asset-list-header"]')
+          && !document.querySelector(".editor-shell")?.classList.contains("nav-resources")) {
+          return null;
+        }
+        return {
+          selector,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          overflowX: element.scrollWidth - element.clientWidth
+        };
+      })
+      .filter((item) => item && item.overflowX > 2);
+  });
+  expect(overflow).toEqual([]);
+}
+
 async function expectToolbarFitsDesignHeader(page: Page): Promise<void> {
   const result = await page.evaluate(() => {
     const toolbar = document.querySelector(".top-toolbar");
@@ -987,9 +1085,9 @@ async function expectScreenListUsesTableColumns(page: Page): Promise<void> {
   const result = await page.evaluate(() => {
     const panel = document.querySelector<HTMLElement>(".layers-panel");
     const header = document.querySelector<HTMLElement>('[data-testid="screen-list-header"]');
-    const row = document.querySelector<HTMLElement>('[data-testid="screen-row-home"]');
+    const row = document.querySelector<HTMLElement>('[data-testid="screen-row-screen-1"]');
     if (!panel || !header || !row) {
-      throw new Error("Missing screen panel, header or Home row");
+      throw new Error("Missing screen panel, header or Screen_1 row");
     }
     const headerLabels = Array.from(header.querySelectorAll<HTMLElement>("span")).map((node) => node.textContent?.trim());
     const cells = Array.from(row.querySelectorAll<HTMLElement>("[data-screen-cell]")).map((node) => node.dataset.screenCell);

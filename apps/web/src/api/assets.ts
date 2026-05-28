@@ -1,12 +1,6 @@
 import type { AssetRef } from "@hiveton-lvgl/schema";
 import { authHeaders } from "./auth";
-
-type ErrorPayload = {
-  error?: {
-    code: string;
-    message: string;
-  };
-};
+import { apiError, apiErrorFromPayload, parseJsonPayload, type ErrorPayload } from "./errors";
 
 export async function uploadProjectAsset(projectId: string, file: File): Promise<AssetRef> {
   const body = new FormData();
@@ -18,9 +12,9 @@ export async function uploadProjectAsset(projectId: string, file: File): Promise
     headers: authHeaders(),
     body
   });
-  const payload = (await response.json()) as { asset?: AssetRef } & ErrorPayload;
-  if (!response.ok || !payload.asset) {
-    throw new Error(payload.error?.message ?? `asset upload failed with status ${response.status}`);
+  const payload = await parseJsonPayload<{ asset?: AssetRef } & ErrorPayload>(response);
+  if (!response.ok || !payload?.asset) {
+    throw apiErrorFromPayload(response, payload, "ASSET_UPLOAD_FAILED", `asset upload failed with status ${response.status}`);
   }
   return payload.asset;
 }
@@ -36,11 +30,15 @@ export async function listProjectAssets(projectId: string): Promise<AssetRef[]> 
   const response = await fetch(`/api/projects/${projectId}/assets`, {
     headers: authHeaders()
   });
-  const payload = (await response.json()) as AssetRef[] | ({ assets?: AssetRef[] } & ErrorPayload);
-  const assets = Array.isArray(payload) ? payload : payload.assets;
+  const payload = await parseJsonPayload<AssetRef[] | ({ assets?: AssetRef[] } & ErrorPayload)>(response);
+  const assets = Array.isArray(payload) ? payload : payload?.assets;
   if (!response.ok || assets === undefined) {
-    const error = Array.isArray(payload) ? undefined : payload.error;
-    throw new Error(error?.message ?? `asset list failed with status ${response.status}`);
+    throw apiErrorFromPayload(
+      response,
+      payload && !Array.isArray(payload) ? payload : undefined,
+      "ASSET_LIST_FAILED",
+      `asset list failed with status ${response.status}`
+    );
   }
   return assets ?? [];
 }
@@ -50,7 +48,7 @@ export async function getProjectAssetContent(projectId: string, assetId: string)
     headers: authHeaders()
   });
   if (!response.ok) {
-    throw new Error(`asset content failed with status ${response.status}`);
+    throw await apiError(response, "ASSET_CONTENT_FAILED", `asset content failed with status ${response.status}`);
   }
   return response.blob();
 }
@@ -60,8 +58,8 @@ export async function deleteProjectAsset(projectId: string, assetId: string): Pr
     method: "DELETE",
     headers: authHeaders()
   });
-  const payload = (await response.json()) as { deleted?: boolean } & ErrorPayload;
-  if (!response.ok || !payload.deleted) {
-    throw new Error(payload.error?.message ?? `asset delete failed with status ${response.status}`);
+  const payload = await parseJsonPayload<{ deleted?: boolean } & ErrorPayload>(response);
+  if (!response.ok || !payload?.deleted) {
+    throw apiErrorFromPayload(response, payload, "ASSET_DELETE_FAILED", `asset delete failed with status ${response.status}`);
   }
 }

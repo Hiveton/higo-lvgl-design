@@ -1,18 +1,18 @@
 <template>
   <aside class="layers-panel panel">
     <slot />
-    <div class="panel-title layers-title">Layers</div>
+    <div class="panel-title layers-title">{{ copy.layers.title }}</div>
     <div class="layer-search-row">
-      <input ref="layerSearchInputRef" v-model="layerQuery" class="panel-search layer-search" data-testid="layer-search-input" placeholder="Search layers..." aria-label="Search layers" title="Search layers" />
-      <button v-if="layerQuery" class="mini-action" type="button" data-testid="clear-layer-search-button" aria-label="Clear layer search" title="Clear layer search" @click="clearLayerSearch">
+      <input ref="layerSearchInputRef" v-model="layerQuery" class="panel-search layer-search" data-testid="layer-search-input" :placeholder="copy.layers.searchPlaceholder" :aria-label="copy.layers.search" :title="copy.layers.search" />
+      <button v-if="layerQuery" class="mini-action" type="button" data-testid="clear-layer-search-button" :aria-label="copy.layers.clearSearch" :title="copy.layers.clearSearch" @click="clearLayerSearch">
         <IconGlyph name="close" />
       </button>
     </div>
     <div class="layer-search-meta" data-testid="layer-search-result-count" role="status" aria-live="polite" aria-atomic="true">{{ layerCountLabel }}</div>
     <div class="layer-list-header" data-testid="layer-list-header">
-      <span>Object</span>
-      <span>State</span>
-      <span>Tools</span>
+      <span>{{ copy.layers.columnObject }}</span>
+      <span>{{ copy.layers.columnState }}</span>
+      <span>{{ copy.layers.columnTools }}</span>
     </div>
     <ol class="layer-tree">
       <li>
@@ -22,12 +22,12 @@
           :class="{ 'selected-layer': selectedWidgetId === activeScreenRootId }"
           data-testid="layer-row-screen-root"
           :aria-pressed="selectedWidgetId === activeScreenRootId ? 'true' : 'false'"
-          :aria-label="`Select screen root ${activeScreenName ?? 'Screen'}`"
-          :title="`Select screen root ${activeScreenName ?? 'Screen'}`"
+          :aria-label="copy.layers.selectScreenRoot(activeScreenName ?? copy.layers.screenFallback)"
+          :title="copy.layers.selectScreenRoot(activeScreenName ?? copy.layers.screenFallback)"
           @click="$emit('select-widget', activeScreenRootId)"
         >
           <span>▾ {{ activeScreenName }}</span>
-          <em>screen</em>
+          <em>{{ copy.layers.screenType }}</em>
         </button>
         <ol>
           <li
@@ -40,8 +40,8 @@
             role="button"
             tabindex="0"
             :aria-pressed="selectedWidgetId === row.widget.id ? 'true' : 'false'"
-            :aria-label="`Select ${row.widget.name} ${row.widget.type} layer`"
-            :title="`Select ${row.widget.name} ${row.widget.type} layer`"
+            :aria-label="copy.layers.selectLayer(row.widget.name, widgetTypeLabel(row.widget.type))"
+            :title="copy.layers.selectLayer(row.widget.name, widgetTypeLabel(row.widget.type))"
             @click="$emit('select-widget', row.widget.id)"
             @keydown.enter.prevent="$emit('select-widget', row.widget.id)"
             @keydown.space.prevent="$emit('select-widget', row.widget.id)"
@@ -54,8 +54,8 @@
               <input
                 class="layer-name-input"
                 :data-testid="`layer-name-${toTestId(row.widget.name)}`"
-                :aria-label="`Rename ${row.widget.name} layer`"
-                :title="`Rename ${row.widget.name} layer`"
+                :aria-label="copy.layers.renameLayer(row.widget.name)"
+                :title="copy.layers.renameLayer(row.widget.name)"
                 :value="row.widget.name"
                 :disabled="row.widget.locked"
                 @click.stop
@@ -64,11 +64,11 @@
               />
             </span>
             <span class="layer-state" data-layer-cell="state" :data-testid="`layer-state-${toTestId(row.widget.name)}`">
-              <span class="layer-eye layer-eye-status" role="img" :aria-label="row.widget.hidden ? 'Layer hidden' : 'Layer visible'" :title="row.widget.hidden ? 'Layer hidden' : 'Layer visible'">
+              <span class="layer-eye layer-eye-status" role="img" :aria-label="row.widget.hidden ? copy.layers.layerHidden : copy.layers.layerVisible" :title="row.widget.hidden ? copy.layers.layerHidden : copy.layers.layerVisible">
                 <IconGlyph :name="row.widget.hidden ? 'eyeOff' : 'eye'" />
               </span>
-              <em v-if="row.widget.hidden">Hidden</em>
-              <em v-if="row.widget.locked">Locked</em>
+              <em v-if="row.widget.hidden">{{ copy.layers.hidden }}</em>
+              <em v-if="row.widget.locked">{{ copy.layers.locked }}</em>
             </span>
             <span class="layer-actions" data-layer-cell="actions">
               <button class="mini-action" type="button" :aria-label="lockLayerLabel(row.widget)" :title="lockLayerLabel(row.widget)" :data-testid="`layer-lock-${toTestId(row.widget.name)}`" @click.stop="$emit('toggle-locked', row.widget.id)">
@@ -100,7 +100,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { WidgetNode } from "@hiveton-lvgl/schema";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
+import { toTestId } from "./testId";
 
 export type LayerRow = {
   widget: WidgetNode;
@@ -118,6 +120,7 @@ const props = defineProps<{
 
 const layerQuery = ref("");
 const layerSearchInputRef = ref<HTMLInputElement | null>(null);
+const copy = useCopy();
 const filteredRows = computed(() => {
   const query = layerQuery.value.trim().toLowerCase();
   if (!query) {
@@ -130,11 +133,11 @@ const filteredRows = computed(() => {
 });
 const layerEmptyMessage = computed(() =>
   layerQuery.value.trim()
-    ? "No layers match this search."
-    : "No widgets on this screen. Add one from Widgets or drop it on the canvas."
+    ? copy.value.layers.noSearchResults
+    : copy.value.layers.empty
 );
 const layerCountLabel = computed(() =>
-  `${filteredRows.value.length} ${filteredRows.value.length === 1 ? "layer" : "layers"}`
+  copy.value.layers.layerCount(filteredRows.value.length)
 );
 
 const emit = defineEmits<{
@@ -185,23 +188,25 @@ function layerIcon(type: WidgetNode["type"]): InstanceType<typeof IconGlyph>["$p
   return icons[type] ?? "widgets";
 }
 
+function widgetTypeLabel(type: WidgetNode["type"]): string {
+  const label = copy.value.widgets.names[type];
+  return label && label.toLowerCase() !== type ? label : type;
+}
+
 function lockLayerLabel(widget: WidgetNode): string {
-  return `${widget.locked ? "Unlock" : "Lock"} ${widget.name} layer`;
+  return widget.locked ? copy.value.layers.unlockLayer(widget.name) : copy.value.layers.lockLayer(widget.name);
 }
 
 function hideLayerLabel(widget: WidgetNode): string {
-  return `${widget.hidden ? "Show" : "Hide"} ${widget.name} layer`;
+  return widget.hidden ? copy.value.layers.showLayer(widget.name) : copy.value.layers.hideLayer(widget.name);
 }
 
 function moveLayerLabel(widget: WidgetNode, direction: "up" | "down"): string {
-  return `Move ${widget.name} layer ${direction}`;
+  return copy.value.layers.moveLayer(widget.name, direction);
 }
 
 function deleteLayerLabel(widget: WidgetNode): string {
-  return `Delete ${widget.name} layer`;
+  return copy.value.layers.deleteLayer(widget.name);
 }
 
-function toTestId(name: string): string {
-  return name.toLowerCase().replace(/_/g, "-");
-}
 </script>

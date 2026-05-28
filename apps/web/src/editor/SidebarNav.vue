@@ -1,5 +1,5 @@
 <template>
-  <nav class="sidebar-nav" aria-label="Editor sections">
+  <nav class="sidebar-nav" :aria-label="copy.navigation.editorSections">
     <button
       v-for="item in navItems"
       :key="item.id"
@@ -19,6 +19,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
 
 export type SidebarNavItem = "widgets" | "layers" | "screens" | "resources" | "inspector" | "code" | "settings";
@@ -32,17 +34,21 @@ defineEmits<{
   activate: [item: SidebarNavItem];
 }>();
 
-const navItems: Array<{ id: SidebarNavItem; icon: SidebarIcon; label: string }> = [
-  { id: "widgets", icon: "widgets", label: "Widgets" },
-  { id: "layers", icon: "layers", label: "Layers" },
-  { id: "screens", icon: "screens", label: "Screens" },
-  { id: "resources", icon: "image", label: "Resources" },
-  { id: "inspector", icon: "settings", label: "Inspector" },
-  { id: "code", icon: "code", label: "Code" },
-  { id: "settings", icon: "settings", label: "Settings" }
-];
+const copy = useCopy();
+
+const navItems = computed<Array<{ id: SidebarNavItem; icon: SidebarIcon; label: string }>>(() => [
+  { id: "widgets", icon: "widgets", label: copy.value.navigation.widgets },
+  { id: "layers", icon: "layers", label: copy.value.navigation.layers },
+  { id: "screens", icon: "screens", label: copy.value.navigation.screens },
+  { id: "resources", icon: "image", label: copy.value.navigation.resources },
+  { id: "inspector", icon: "settings", label: copy.value.navigation.inspector },
+  { id: "code", icon: "code", label: copy.value.navigation.code },
+  { id: "settings", icon: "settings", label: copy.value.navigation.settings }
+]);
 
 function navItemLabel(item: { id: SidebarNavItem; label: string }): string {
-  return item.id === props.activeItem ? `${item.label} section selected` : `Open ${item.label} section`;
+  return item.id === props.activeItem
+    ? copy.value.navigation.selectedSection(item.label)
+    : copy.value.navigation.openSection(item.label);
 }
 </script>

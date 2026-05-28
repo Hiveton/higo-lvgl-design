@@ -21,7 +21,7 @@
       :alt="widgetText(item.widget)"
     />
     <span v-else-if="item.widget.type === 'image'" class="widget-content image-placeholder">
-      Missing preview
+      {{ copy.previewRuntime.imageMissing }}
       <small>{{ imagePlaceholderHint }}</small>
     </span>
     <span v-else-if="item.widget.type === 'label' || item.widget.type === 'button' || item.widget.type === 'container'" class="widget-content">
@@ -66,6 +66,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { WidgetNode } from "@hiveton-lvgl/schema";
+import { useCopy } from "../i18n/useCopy";
 import type { RenderedWidget } from "./CanvasWorkspace.vue";
 
 const props = defineProps<{
@@ -84,13 +85,14 @@ const emit = defineEmits<{
 }>();
 
 const selected = computed(() => props.selectedWidgetId === props.item.widget.id);
+const copy = useCopy();
 const canvasWidgetActionLabel = computed(() =>
-  `Select and drag ${props.item.widget.name} ${props.item.widget.type} widget`
+  copy.value.previewRuntime.selectWidget(props.item.widget.name, widgetTypeLabel(props.item.widget.type))
 );
-const resizeHandleTitle = computed(() => `Resize ${props.item.widget.name} widget`);
+const resizeHandleTitle = computed(() => copy.value.previewRuntime.resizeWidget(props.item.widget.name));
 const previewUrl = computed(() => props.imagePreviewUrl(props.item.widget));
 const imagePlaceholderHint = computed(() =>
-  props.item.widget.props.assetId ? props.widgetText(props.item.widget) : "Select an asset"
+  props.item.widget.props.assetId ? props.widgetText(props.item.widget) : copy.value.previewRuntime.selectAsset
 );
 const isChecked = computed(() => props.item.widget.props.checked === true);
 const valuePercent = computed(() => {
@@ -106,19 +108,20 @@ const arcStyle = computed(() => ({
   background: `conic-gradient(#2f9bff 0deg ${Math.round(valuePercent.value * 3.6)}deg, rgba(255, 255, 255, 0.12) ${Math.round(valuePercent.value * 3.6)}deg 360deg)`
 }));
 const selectedDropdownOption = computed(() => {
-  const options = propText("options", "Option 1\nOption 2").split(/\r?\n/).filter(Boolean);
-  return options[propNumber("selected", 0)] ?? options[0] ?? "Dropdown";
+  const options = propText("options", copy.value.previewRuntime.dropdownDefaultOptions).split(/\r?\n/).filter(Boolean);
+  return options[propNumber("selected", 0)] ?? options[0] ?? copy.value.previewRuntime.dropdownFallback;
 });
 const chartBarHeights = computed(() => {
   const values = props.item.widget.props.values;
-  const rawValues = Array.isArray(values) && values.length > 0
-    ? values.filter((value) => Number.isFinite(value))
-    : Array.from({ length: 6 }, (_unused, index) => 24 + (((index + 1) * 19) % 58));
-  if (!rawValues.length) {
-    return [24, 43, 62, 81, 42, 61];
-  }
   const min = propNumber("min", 0);
   const max = propNumber("max", 100);
+  const pointCount = Math.max(1, Math.floor(propNumber("pointCount", 8)));
+  const rawValues = Array.isArray(values) && values.length > 0
+    ? values.filter((value) => Number.isFinite(value)).slice(0, pointCount).map((value) => Math.max(min, Math.min(max, value)))
+    : Array.from({ length: pointCount }, (_unused, index) => min + ((index * 37 + 20) % (Math.max(0, max - min) + 1)));
+  if (!rawValues.length) {
+    return [min];
+  }
   const span = Math.max(1, max - min);
   return rawValues.map((value) => Math.max(4, Math.min(100, Math.round(((value - min) / span) * 100))));
 });
@@ -131,6 +134,11 @@ function propText(key: string, fallback: string): string {
 function propNumber(key: string, fallback: number): number {
   const value = props.item.widget.props[key];
   return typeof value === "number" ? value : fallback;
+}
+
+function widgetTypeLabel(type: WidgetNode["type"]): string {
+  const label = copy.value.widgets.names[type];
+  return label && label.toLowerCase() !== type ? label : type;
 }
 
 </script>

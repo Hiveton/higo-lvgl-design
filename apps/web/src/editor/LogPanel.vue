@@ -1,6 +1,6 @@
 <template>
   <div class="log-panel panel">
-    <div class="tabs compact" role="tablist" aria-label="Bottom dock sections">
+    <div class="tabs compact" role="tablist" :aria-label="copy.bottomDock.sections">
       <button
         class="tab"
         :class="{ active: modelValue === 'log' }"
@@ -13,7 +13,7 @@
         @click="$emit('update:modelValue', 'log')"
         @keydown="handleBottomTabKeydown($event, 'log')"
       >
-        Console
+        {{ copy.bottomDock.console }}
       </button>
       <button
         class="tab"
@@ -27,21 +27,21 @@
         @click="$emit('update:modelValue', 'timeline')"
         @keydown="handleBottomTabKeydown($event, 'timeline')"
       >
-        Build
+        {{ copy.bottomDock.build }}
       </button>
     </div>
     <template v-if="modelValue === 'log'">
       <div class="build-status" :data-testid="`build-status-${buildStatus}`" role="status" aria-live="polite" aria-atomic="true">
-        Build: <strong>{{ buildStatus }}</strong>
+        {{ copy.bottomDock.buildLabel }} <strong>{{ localizedBuildStatus }}</strong>
       </div>
       <button v-if="exportDownloadUrl" class="icon-button download-link" type="button" data-testid="download-export-button" :aria-label="downloadExportLabel" :title="downloadExportLabel" @click="$emit('download-export')">
         <IconGlyph name="download" />
       </button>
-      <p v-if="logEntries.length === 0" class="log-empty" data-testid="console-empty-state" role="status" aria-live="polite" aria-atomic="true">No console messages yet.</p>
+      <p v-if="logEntries.length === 0" class="log-empty" data-testid="console-empty-state" role="status" aria-live="polite" aria-atomic="true">{{ copy.bottomDock.emptyConsole }}</p>
       <template v-else>
         <div class="console-list-header" data-testid="console-list-header">
-          <span>Time</span>
-          <span>Message</span>
+          <span>{{ copy.bottomDock.logColumns.time }}</span>
+          <span>{{ copy.bottomDock.logColumns.message }}</span>
         </div>
         <ol class="log-stream" data-testid="console-log-stream" role="status" aria-live="polite" aria-atomic="false">
           <li v-for="entry in logEntries" :key="entry.id" class="log-entry" data-testid="console-log-entry">
@@ -53,8 +53,8 @@
     </template>
     <template v-else>
       <div class="build-summary" :class="`build-summary-${buildStatus}`" data-testid="build-summary" role="status" aria-live="polite" aria-atomic="true">
-        <span>Build Status</span>
-        <strong>{{ buildStatus }}</strong>
+        <span>{{ copy.bottomDock.buildStatus }}</span>
+        <strong>{{ localizedBuildStatus }}</strong>
         <p v-if="latestBuildMessage" class="build-last-log" data-testid="build-last-log">
           {{ latestBuildMessage }}
         </p>
@@ -62,19 +62,19 @@
           <IconGlyph name="download" />
         </button>
       </div>
-      <h3 class="timeline-heading">Project Activity</h3>
-      <p v-if="timelineItems.length === 0" class="log-empty" data-testid="timeline-empty-state" role="status" aria-live="polite" aria-atomic="true">No project activity yet.</p>
+      <h3 class="timeline-heading">{{ copy.bottomDock.projectActivity }}</h3>
+      <p v-if="timelineItems.length === 0" class="log-empty" data-testid="timeline-empty-state" role="status" aria-live="polite" aria-atomic="true">{{ copy.bottomDock.emptyTimeline }}</p>
       <template v-else>
         <div class="timeline-list-header" data-testid="timeline-list-header">
-          <span>Kind</span>
-          <span>Item</span>
-          <span>Status</span>
+          <span>{{ copy.bottomDock.timelineColumns.kind }}</span>
+          <span>{{ copy.bottomDock.timelineColumns.item }}</span>
+          <span>{{ copy.bottomDock.timelineColumns.status }}</span>
         </div>
         <ol class="timeline-list" data-testid="timeline-list">
           <li v-for="item in timelineItems" :key="item.id">
-            <span data-timeline-cell="kind" class="timeline-kind" :class="`timeline-kind-${item.kind.toLowerCase()}`" :data-testid="`timeline-kind-${item.kind.toLowerCase()}`">{{ item.kind }}</span>
+            <span data-timeline-cell="kind" class="timeline-kind" :class="`timeline-kind-${item.kind.toLowerCase()}`" :data-testid="`timeline-kind-${item.kind.toLowerCase()}`">{{ timelineKindLabel(item.kind) }}</span>
             <strong data-timeline-cell="item">{{ item.label }}</strong>
-            <em data-timeline-cell="status" class="timeline-status" data-testid="timeline-status">{{ item.status }}</em>
+            <em data-timeline-cell="status" class="timeline-status" data-testid="timeline-status">{{ timelineStatusLabel(item.status) }}</em>
           </li>
         </ol>
       </template>
@@ -84,6 +84,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
 
 export type LogEntry = {
@@ -118,7 +119,9 @@ type BottomTab = typeof bottomTabs[number];
 const logTabRef = ref<HTMLButtonElement | null>(null);
 const timelineTabRef = ref<HTMLButtonElement | null>(null);
 const bottomTabRefs = [logTabRef, timelineTabRef];
-const downloadExportLabel = computed(() => `Download ${props.projectName} LVGL C zip`);
+const copy = useCopy();
+const downloadExportLabel = computed(() => copy.value.bottomDock.downloadExport(props.projectName));
+const localizedBuildStatus = computed(() => copy.value.bottomDock.buildStatusLabels[props.buildStatus]);
 
 function handleBottomTabKeydown(event: KeyboardEvent, tab: BottomTab): void {
   const currentIndex = bottomTabs.indexOf(tab);
@@ -141,4 +144,12 @@ const latestBuildMessage = computed(() => {
     .find((entry) => entry.id === "log-export-downloaded" || entry.id === "log-export-download-failed");
   return exportFeedback?.message ?? props.logEntries.at(-1)?.message ?? "";
 });
+
+function timelineKindLabel(kind: string): string {
+  return copy.value.bottomDock.timelineKinds[kind as keyof typeof copy.value.bottomDock.timelineKinds] ?? kind;
+}
+
+function timelineStatusLabel(status: string): string {
+  return copy.value.bottomDock.timelineStatuses[status as keyof typeof copy.value.bottomDock.timelineStatuses] ?? status;
+}
 </script>

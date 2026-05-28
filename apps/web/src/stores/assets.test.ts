@@ -1,9 +1,11 @@
 import { setActivePinia, createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAssetsStore } from "./assets";
+import { useLocaleStore } from "./locale";
 
 describe("useAssetsStore", () => {
   beforeEach(() => {
+    localStorage.clear();
     setActivePinia(createPinia());
   });
 
@@ -81,7 +83,30 @@ describe("useAssetsStore", () => {
     expect(store.error).toBeNull();
   });
 
-  it("stores an error when upload fails", async () => {
+  it("imports a local image asset without calling the API", () => {
+    const createObjectURL = vi.fn().mockReturnValue("blob:local-heart");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useAssetsStore();
+
+    const asset = store.importLocalAsset("project-local", new File(["png"], "heart.png", { type: "image/png" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(asset?.id).toMatch(/^local-heart-png-/);
+    expect(asset).toMatchObject({
+      projectId: "project-local",
+      name: "heart.png",
+      kind: "image",
+      mimeType: "image/png",
+      objectKey: "local://heart.png"
+    });
+    expect(store.assets).toHaveLength(1);
+    expect(store.previewUrls[asset?.id ?? ""]).toBe("blob:local-heart");
+    expect(store.error).toBeNull();
+  });
+
+  it("stores a localized error when upload fails", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -95,7 +120,52 @@ describe("useAssetsStore", () => {
     await store.uploadAsset("project-1", new File(["png"], "broken.png", { type: "image/png" }));
 
     expect(store.assets).toHaveLength(0);
-    expect(store.error).toBe("only PNG and JPG assets are supported");
+    expect(store.error).toBe("Only PNG, JPG, TTF, OTF, WOFF and WOFF2 assets are supported");
+  });
+
+  it("stores Chinese upload API errors when the locale is Chinese", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: "UNSUPPORTED_ASSET_TYPE", message: "only PNG and JPG assets are supported" } }), {
+          status: 400
+        })
+      )
+    );
+    useLocaleStore().setLocale("zh-CN");
+    const store = useAssetsStore();
+
+    await store.uploadAsset("project-1", new File(["png"], "broken.png", { type: "image/png" }));
+
+    expect(store.assets).toHaveLength(0);
+    expect(store.error).toBe("仅支持 PNG、JPG、TTF、OTF、WOFF 和 WOFF2 资源");
+  });
+
+  it("keeps Chinese upload errors localized when the API returns non-JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("<html>server error</html>", { status: 500, headers: { "Content-Type": "text/html" } }))
+    );
+    useLocaleStore().setLocale("zh-CN");
+    const store = useAssetsStore();
+
+    await store.uploadAsset("project-1", new File(["png"], "broken.png", { type: "image/png" }));
+
+    expect(store.assets).toHaveLength(0);
+    expect(store.error).toBe("资源上传失败");
+    expect(store.error).not.toContain("Unexpected token");
+  });
+
+  it("keeps Chinese asset list errors localized when the API returns an empty body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 500 })));
+    useLocaleStore().setLocale("zh-CN");
+    const store = useAssetsStore();
+
+    await store.loadAssets("project-1");
+
+    expect(store.assets).toHaveLength(0);
+    expect(store.error).toBe("资源列表加载失败");
+    expect(store.error).not.toContain("Unexpected end");
   });
 
   it("rejects unsupported asset MIME types before calling the API", async () => {
@@ -107,7 +177,7 @@ describe("useAssetsStore", () => {
 
     expect(asset).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(store.error).toBe("only PNG, JPG, TTF, OTF, WOFF and WOFF2 assets are supported");
+    expect(store.error).toBe("Only PNG, JPG, TTF, OTF, WOFF and WOFF2 assets are supported");
     expect(store.loading).toBe(false);
   });
 
@@ -121,7 +191,7 @@ describe("useAssetsStore", () => {
 
     expect(asset).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(store.error).toBe("asset file is too large");
+    expect(store.error).toBe("Asset file is too large");
     expect(store.loading).toBe(false);
   });
 

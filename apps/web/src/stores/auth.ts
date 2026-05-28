@@ -1,8 +1,11 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { clearAuthToken, getAuthToken, getCurrentUser, login, type AuthUser } from "../api/auth";
+import { localizeError } from "../i18n/errors";
+import { useLocaleStore } from "./locale";
 
 export const useAuthStore = defineStore("auth", () => {
+  const localeStore = useLocaleStore();
   const user = ref<AuthUser | null>(null);
   const error = ref<string | null>(null);
   const restoring = ref(false);
@@ -17,7 +20,7 @@ export const useAuthStore = defineStore("auth", () => {
       const response = await login(email, password);
       user.value = response.user;
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "login failed";
+      error.value = localizeError(caught, localeStore.locale, "LOGIN_FAILED");
     }
   }
 
@@ -31,7 +34,7 @@ export const useAuthStore = defineStore("auth", () => {
       user.value = await getCurrentUser();
     } catch (caught) {
       user.value = null;
-      error.value = caught instanceof Error ? caught.message : "session restore failed";
+      error.value = localizeError(caught, localeStore.locale, "CURRENT_USER_LOOKUP_FAILED");
     } finally {
       restoring.value = false;
     }

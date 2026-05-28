@@ -1,8 +1,8 @@
 <template>
   <div class="screens-list">
     <div class="panel-title small">
-      Screens
-      <button class="mini-action" type="button" aria-label="Add screen" title="Add screen" data-testid="add-screen-button" @click="$emit('add-screen')"><IconGlyph name="add" /></button>
+      {{ copy.screens.title }}
+      <button class="mini-action" type="button" :aria-label="copy.screens.add" :title="copy.screens.add" data-testid="add-screen-button" @click="$emit('add-screen')"><IconGlyph name="add" /></button>
       <button class="mini-action" type="button" :aria-label="duplicateScreenLabel" :title="duplicateScreenLabel" data-testid="duplicate-screen-button" :disabled="!activeScreen" @click="duplicateActiveScreen"><IconGlyph name="copy" /></button>
       <button class="mini-action" type="button" :aria-label="deleteScreenLabel" :title="deleteScreenLabel" data-testid="delete-screen-button" :disabled="screens.length <= 1" @click="$emit('delete-active-screen')"><IconGlyph name="trash" /></button>
     </div>
@@ -17,29 +17,29 @@
       :title="renameScreenLabel"
       :aria-invalid="hasDuplicateScreenNames ? 'true' : undefined"
       :aria-describedby="hasDuplicateScreenNames ? 'screen-name-warning' : undefined"
-      placeholder="Screen name"
+      :placeholder="copy.screens.screenNamePlaceholder"
       :value="activeScreen.name"
       @input="renameActiveScreen"
     />
     <p v-if="hasDuplicateScreenNames" id="screen-name-warning" class="field-error" data-testid="screen-name-warning" role="alert">
-      Screen names should be unique.
+      {{ copy.screens.uniqueNames }}
     </p>
     <div class="screen-list-header" data-testid="screen-list-header">
-      <span>Screen</span>
-      <span>Widgets</span>
-      <span>State</span>
+      <span>{{ copy.screens.columnScreen }}</span>
+      <span>{{ copy.screens.columnWidgets }}</span>
+      <span>{{ copy.screens.columnState }}</span>
     </div>
     <button
-      v-for="row in designRows"
+      v-for="row in screenRows"
       :key="row.id"
       class="screen-row"
       type="button"
-      :class="{ active: row.active, ghost: row.ghost }"
+      :class="{ active: row.active }"
       :aria-label="screenRowActionLabel(row)"
       :aria-pressed="row.active ? 'true' : 'false'"
       :title="screenRowActionLabel(row)"
       :data-testid="`screen-row-${toTestId(row.name)}`"
-      @click="switchRow(row)"
+      @click="emit('switch-screen', row.id)"
       >
       <span class="screen-name-line" data-screen-cell="name">
         <strong>{{ row.name }}</strong>
@@ -53,13 +53,17 @@
 <script setup lang="ts">
 import type { ScreenNode } from "@hiveton-lvgl/schema";
 import { computed } from "vue";
+import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
+import { toTestId } from "./testId";
 
 const props = defineProps<{
   activeScreen: ScreenNode | undefined;
   screens: ScreenNode[];
   hasDuplicateScreenNames: boolean;
 }>();
+
+const copy = useCopy();
 
 const emit = defineEmits<{
   "add-screen": [name?: string];
@@ -91,69 +95,47 @@ type ScreenRow = {
   name: string;
   meta: string;
   active: boolean;
-  ghost?: boolean;
 };
 
-const designRows = computed<ScreenRow[]>(() => {
-  if (props.screens.length !== 1 || props.screens[0]?.name !== "Screen_1") {
-    return props.screens.map((screen) => ({
-      id: screen.id,
-      name: screen.name,
-      meta: widgetCountLabel(widgetCount(screen)),
-      active: props.activeScreen?.id === screen.id
-    }));
-  }
-  const activeId = props.screens[0].id;
-  return ["Splash", "Home", "Activity", "Heart Rate", "Sleep", "Settings", "About"].map((name) => ({
-    id: name === "Home" ? activeId : `design-${name.toLowerCase().replace(/\s+/g, "-")}`,
-    name,
-    meta: name === "Home" ? widgetCountLabel(widgetCount(props.screens[0])) : "0 widgets",
-    active: name === "Home",
-    ghost: name !== "Home"
-  }));
-});
+const screenRows = computed<ScreenRow[]>(() =>
+  props.screens.map((screen) => ({
+    id: screen.id,
+    name: screen.name,
+    meta: widgetCountLabel(widgetCount(screen)),
+    active: props.activeScreen?.id === screen.id
+  }))
+);
 const screenCountLabel = computed(() =>
-  `${designRows.value.length} ${designRows.value.length === 1 ? "screen" : "screens"}`
+  copy.value.screens.screenCount(screenRows.value.length)
 );
 const duplicateScreenLabel = computed(() =>
-  props.activeScreen ? `Duplicate ${props.activeScreen.name} screen` : "Duplicate screen"
+  props.activeScreen ? copy.value.screens.duplicateScreen(props.activeScreen.name) : copy.value.screens.duplicate
 );
 const deleteScreenLabel = computed(() =>
-  props.activeScreen ? `Delete ${props.activeScreen.name} screen` : "Delete screen"
+  props.activeScreen ? copy.value.screens.deleteScreen(props.activeScreen.name) : copy.value.screens.delete
 );
 const renameScreenLabel = computed(() =>
-  props.activeScreen ? `Rename ${props.activeScreen.name} screen` : "Rename active screen"
+  props.activeScreen ? copy.value.screens.renameScreen(props.activeScreen.name) : copy.value.screens.renameActiveScreen
 );
-
-function switchRow(row: ScreenRow): void {
-  if (row.ghost) {
-    emit("add-screen", row.name);
-    return;
-  }
-  emit("switch-screen", row.id);
-}
 
 function countWidgets(widgets: ScreenNode["root"]["children"]): number {
   return widgets.reduce((count, widget) => count + 1 + countWidgets(widget.children), 0);
 }
 
 function widgetCountLabel(count: number): string {
-  return `${count} ${count === 1 ? "widget" : "widgets"}`;
+  return copy.value.screens.widgetCount(count);
 }
 
 function screenStateLabel(row: ScreenRow): string {
   if (row.active) {
-    return "Active";
+    return copy.value.screens.active;
   }
-  return row.ghost ? "Draft" : "Ready";
+  return copy.value.screens.ready;
 }
 
 function screenRowActionLabel(row: ScreenRow): string {
-  const action = row.ghost ? "Create" : "Open";
-  return `${action} ${row.name} screen, ${screenStateLabel(row)}, ${row.meta}`;
+  const state = screenStateLabel(row);
+  return copy.value.screens.openScreen(row.name, state, row.meta);
 }
 
-function toTestId(name: string): string {
-  return name.toLowerCase().replace(/_/g, "-");
-}
 </script>

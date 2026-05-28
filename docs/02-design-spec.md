@@ -213,4 +213,7 @@ Card border radius: <= 8px
 - UI 面板标题使用英文：Widgets、Layers、Canvas、Style、Events、Layout、Assets、Log、Timeline、Simulator。
 - 控件类型使用英文，保持和 LVGL/API/codegen 语义一致。
 - 开发文档使用中文，代码符号、API path、类型名保持英文。
+- 编辑器 chrome 支持 `en-US` 和 `zh-CN` 两种语言；顶部工具栏、操作按钮、空状态、校验错误和确认弹窗文案必须逐步接入前端 copy dictionary。
+- LVGL 事件名、API path、ProjectDoc 字段、C 文件名、资源文件名、widget id/name 和内置字体符号保持英文原文，例如 `LV_EVENT_CLICKED`、`/api/projects/:projectId/export/c`、`ui.c`、`lv_font_montserrat_48`。
+- 默认语言为 `en-US`，语言选择持久化到本地存储，切换语言不得改变 `ProjectDoc` 内容。
 - 错误提示必须能指导下一步，例如 `Missing asset: icon_heart.png`，避免只显示 `Failed`。
