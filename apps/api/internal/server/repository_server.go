@@ -108,9 +108,13 @@ func (server *RepositoryServer) login(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
+	if err := validateLoginRequest(payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_LOGIN_REQUEST", err.Error())
+		return
+	}
 	user, err := server.userRepo.FindByEmail(request.Context(), payload.Email)
 	if err != nil || !auth.VerifyPassword(user.PasswordHash, payload.Password) {
-		writeError(writer, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid email or password")
+		writeError(writer, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 		return
 	}
 
@@ -156,6 +160,10 @@ func (server *RepositoryServer) createProject(writer http.ResponseWriter, reques
 	}
 	user, _ := server.userFromRequest(request)
 	doc := defaultProjectDoc("pending", payload.Name, payload.Target, time.Now().UTC().Format(time.RFC3339))
+	if err := validateProjectDoc(doc, "pending"); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_PROJECT_DOC", err.Error())
+		return
+	}
 	project, err := server.projectRepo.Create(request.Context(), user.ID, payload.Name, doc)
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "PROJECT_CREATE_FAILED", err.Error())
@@ -243,6 +251,10 @@ func (server *RepositoryServer) uploadAsset(writer http.ResponseWriter, request 
 	}
 	if err := request.ParseMultipartForm(5 << 20); err != nil {
 		writeError(writer, http.StatusBadRequest, "INVALID_MULTIPART", "invalid multipart form")
+		return
+	}
+	if err := validateAssetUploadMultipartForm(request); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_MULTIPART", err.Error())
 		return
 	}
 	file, header, err := request.FormFile("file")
@@ -367,7 +379,7 @@ func (server *RepositoryServer) deleteAsset(writer http.ResponseWriter, request 
 		return
 	}
 	if projectDocReferencesAsset(project.Doc, assetID) {
-		writeError(writer, http.StatusConflict, "ASSET_IN_USE", "asset is used by image widget")
+		writeError(writer, http.StatusConflict, "ASSET_IN_USE", "asset is still referenced by ProjectDoc")
 		return
 	}
 	if err := server.assetRepo.Delete(request.Context(), user.ID, projectID, assetID); err != nil {
@@ -383,12 +395,26 @@ func (server *RepositoryServer) deleteAsset(writer http.ResponseWriter, request 
 func (server *RepositoryServer) exportProjectC(writer http.ResponseWriter, request *http.Request) {
 	user, _ := server.userFromRequest(request)
 	projectID := chi.URLParam(request, "projectId")
+	createVersion, err := shouldCreateExportVersion(request)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
 	project, err := server.projectRepo.Get(request.Context(), user.ID, projectID)
 	if err != nil {
 		writeRepositoryNotFound(writer, err, "PROJECT_NOT_FOUND", "project not found")
 		return
 	}
-	_, _ = server.projectRepo.CreateVersion(request.Context(), user.ID, projectID, "Build snapshot", project.Doc)
+	if err := validateProjectDoc(project.Doc, projectID); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_PROJECT_DOC", err.Error())
+		return
+	}
+	if createVersion {
+		if _, err := server.projectRepo.CreateVersion(request.Context(), user.ID, projectID, "Build snapshot", project.Doc); err != nil {
+			writeError(writer, http.StatusInternalServerError, "PROJECT_VERSION_CREATE_FAILED", err.Error())
+			return
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	job, err := server.jobRepo.Create(request.Context(), jobs.CreateJobInput{
 		OwnerID:   user.ID,
@@ -433,7 +459,7 @@ func (server *RepositoryServer) downloadJobResult(writer http.ResponseWriter, re
 		writeRepositoryNotFound(writer, err, "JOB_NOT_FOUND", "job not found")
 		return
 	}
-	if job.ResultObjectKey == "" {
+	if job.Status != "succeeded" || job.ResultObjectKey == "" {
 		writeError(writer, http.StatusNotFound, "JOB_RESULT_NOT_FOUND", "job result not found")
 		return
 	}
@@ -492,8 +518,32 @@ func imageDimensions(content []byte) (int, int) {
 	return config.Width, config.Height
 }
 
+func validateAssetUploadMultipartForm(request *http.Request) error {
+	form := request.MultipartForm
+	if form == nil {
+		return fmt.Errorf("invalid multipart form")
+	}
+	if len(form.File["file"]) != 1 {
+		return fmt.Errorf("asset file is required")
+	}
+	for field := range form.File {
+		if field != "file" {
+			return fmt.Errorf("unsupported multipart file field: %s", field)
+		}
+	}
+	if len(form.Value["kind"]) != 1 || strings.TrimSpace(form.Value["kind"][0]) == "" {
+		return fmt.Errorf("asset kind is required")
+	}
+	for field := range form.Value {
+		if field != "kind" {
+			return fmt.Errorf("unsupported multipart field: %s", field)
+		}
+	}
+	return nil
+}
+
 func classifyUploadedAsset(filename string, requestedKind string, detectedMimeType string) (string, string, bool) {
-	if detectedMimeType == "image/png" || detectedMimeType == "image/jpeg" {
+	if isSupportedImageMimeType(detectedMimeType) {
 		return "image", detectedMimeType, true
 	}
 	if strings.TrimSpace(requestedKind) == "font" {
@@ -502,6 +552,19 @@ func classifyUploadedAsset(filename string, requestedKind string, detectedMimeTy
 		}
 	}
 	return "", "", false
+}
+
+func isSupportedImageMimeType(mimeType string) bool {
+	return mimeType == "image/png" || mimeType == "image/jpeg"
+}
+
+func isSupportedFontMimeType(mimeType string) bool {
+	switch mimeType {
+	case "font/ttf", "font/otf", "font/woff", "font/woff2":
+		return true
+	default:
+		return false
+	}
 }
 
 func fontMimeTypeForName(filename string) (string, bool) {
@@ -521,7 +584,20 @@ func fontMimeTypeForName(filename string) (string, bool) {
 }
 
 func decodeJSON(request *http.Request, target any) error {
-	return json.NewDecoder(request.Body).Decode(target)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	return decodeSingleJSONValue(decoder, target)
+}
+
+func decodeSingleJSONValue(decoder *json.Decoder, target any) error {
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("request body must contain a single JSON value")
+	}
+	return nil
 }
 
 func stringValue(value any, fallback string) string {

@@ -85,7 +85,7 @@ type WidgetNode = {
   parentId: string | null
   children: WidgetNode[]
   layout: LayoutBox
-  props: Record<string, string | number | boolean>
+  props: Record<string, string | number | boolean | number[]>
   style: WidgetStyle
   locked: boolean
   hidden: boolean
@@ -100,7 +100,7 @@ type WidgetNode = {
 - `children` 顺序就是图层和生成代码的顺序。
 - `locked` 只影响编辑器行为，不影响导出。
 - `hidden` 首版导出时仍生成对象，但设置隐藏状态。
-- 所有尺寸和坐标以 LVGL 像素为单位。
+- 所有尺寸和坐标以 LVGL 像素为单位，并使用整数值。
 
 ## WidgetType
 
@@ -143,7 +143,9 @@ type LayoutBox = {
 
 - 第一版以绝对定位为主。
 - `flex` 只在 `container` 和 `screen` 上生效。
+- `x`、`y`、`width`、`height` 和 `flex.gap` 必须为整数。
 - `width`、`height` 必须大于 `0`，screen root 使用 target 尺寸。
+- `flex.gap` 必须大于等于 `0`。
 
 ## WidgetStyle
 
@@ -164,13 +166,17 @@ type WidgetStyle = {
   lineSpace?: number
   letterSpace?: number
   align?: "left" | "center" | "right"
+  blendMode?: "normal" | "additive" | "subtractive" | "multiply" | "replace"
 }
 ```
 
 约束：
 
 - 颜色使用 `#RRGGBB`。
+- `opacity`、`radius`、`padding`、`lineSpace` 和 `letterSpace` 必须为整数。
 - `opacity` 范围为 `0` 到 `100`。
+- `radius`、`padding`、`lineSpace` 和 `letterSpace` 必须大于等于 `0`。
+- `blendMode` 默认按 `"normal"` 处理；非默认值会映射到 LVGL `LV_BLEND_MODE_*` 常量。
 - `font` 首版支持内置 Montserrat 名称和上传字体资源 id。
 - 当 `font` 不是 `lv_font_*` 内置符号时，必须能在 `ProjectDoc.assets` 中找到同 id 的 `kind:"font"` 资源。
 
@@ -182,7 +188,7 @@ type AssetRef = {
   projectId: string
   name: string
   kind: "image" | "font"
-  mimeType: string
+  mimeType: "image/png" | "image/jpeg" | "font/ttf" | "font/otf" | "font/woff" | "font/woff2"
   width?: number
   height?: number
   sizeBytes: number
@@ -193,10 +199,12 @@ type AssetRef = {
 
 约束：
 
-- image 首版支持 PNG/JPG。
-- font 首版可登记元数据，完整字体转换在后续版本实现。
-- 被 image widget `props.assetId` 或 widget `style.font` 引用的资源删除前必须先清理引用并保存。
-- `objectKey` 只能由后端生成。
+- image 首版仅支持 `image/png` 和 `image/jpeg`。
+- font 首版支持 `font/ttf`、`font/otf`、`font/woff` 和 `font/woff2` 元数据；完整字体转换在后续版本实现。
+- `width`、`height` 和 `sizeBytes` 必须为整数；`width`、`height` 为非负像素值，`sizeBytes` 为非负字节数。
+- `createdAt` 使用 ISO 8601 UTC 字符串。
+- 被 image widget `props.assetId`、widget `style.font` 或 reusable style `style.font` 引用的资源删除前必须先清理引用并保存。
+- 云端 `objectKey` 只能由后端生成，并且必须位于当前 project 的 `projects/{projectId}/assets/` 存储作用域下；本地未同步资源使用 `local://` 前缀。
 
 ## StyleDef
 
@@ -225,6 +233,7 @@ type EventBinding = {
 
 - `widgetId` 必须指向存在的 widget。
 - `handlerName` 必须生成合法 C 函数名。
+- `handlerName` 生成的 C callback 符号不能与 widget、资源、可复用样式等导出符号冲突。
 - Codegen 生成 callback stub，不实现业务逻辑。
 
 ## 示例 ProjectDoc

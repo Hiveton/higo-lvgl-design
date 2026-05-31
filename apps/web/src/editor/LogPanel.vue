@@ -27,7 +27,7 @@
         @click="$emit('update:modelValue', 'timeline')"
         @keydown="handleBottomTabKeydown($event, 'timeline')"
       >
-        {{ copy.bottomDock.build }}
+        {{ copy.bottomDock.timeline }}
       </button>
     </div>
     <template v-if="modelValue === 'log'">

@@ -63,6 +63,66 @@ describe("useAuthStore", () => {
     expect(getAuthToken()).toBeNull();
   });
 
+  it("does not restore a stale user after logout while restore is in flight", async () => {
+    setAuthToken("signed-token");
+    let resolveCurrentUser: (response: Response) => void = () => undefined;
+    const currentUserResponse = new Promise<Response>((resolve) => {
+      resolveCurrentUser = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(currentUserResponse));
+    const store = useAuthStore();
+
+    const restore = store.restoreSession();
+    store.logout();
+    resolveCurrentUser(new Response(
+      JSON.stringify({ id: "user-demo", email: "demo@hiveton.dev", displayName: "Hiveton Demo" }),
+      { status: 200 }
+    ));
+    await restore;
+
+    expect(store.user).toBeNull();
+    expect(store.error).toBeNull();
+    expect(getAuthToken()).toBeNull();
+  });
+
+  it("keeps the latest logged-in user when restore resolves after login", async () => {
+    setAuthToken("signed-token");
+    let resolveCurrentUser: (response: Response) => void = () => undefined;
+    const currentUserResponse = new Promise<Response>((resolve) => {
+      resolveCurrentUser = resolve;
+    });
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/auth/me") {
+        return currentUserResponse;
+      }
+      if (url === "/api/auth/login") {
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            token: "fresh-token",
+            user: { id: "user-fresh", email: "fresh@hiveton.dev", displayName: "Fresh User" }
+          }),
+          { status: 200 }
+        ));
+      }
+      return Promise.reject(new Error(`unexpected request ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useAuthStore();
+
+    const restore = store.restoreSession();
+    await store.loginWithCredentials("fresh@hiveton.dev", "password");
+    resolveCurrentUser(new Response(
+      JSON.stringify({ id: "user-old", email: "old@hiveton.dev", displayName: "Old User" }),
+      { status: 200 }
+    ));
+    await restore;
+
+    expect(store.user).toMatchObject({ id: "user-fresh", email: "fresh@hiveton.dev" });
+    expect(store.error).toBeNull();
+    expect(store.restoring).toBe(false);
+    expect(getAuthToken()).toBe("fresh-token");
+  });
+
   it("surfaces localized login API errors", async () => {
     vi.stubGlobal(
       "fetch",

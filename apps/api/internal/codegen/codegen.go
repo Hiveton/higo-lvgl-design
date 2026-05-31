@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type ProjectDoc struct {
@@ -50,6 +51,7 @@ type WidgetNode struct {
 	Layout   LayoutBox      `json:"layout"`
 	Props    map[string]any `json:"props"`
 	Style    WidgetStyle    `json:"style"`
+	Locked   bool           `json:"locked"`
 	Hidden   bool           `json:"hidden"`
 }
 
@@ -101,6 +103,7 @@ type WidgetStyle struct {
 	BorderColor string     `json:"borderColor,omitempty"`
 	Radius      int        `json:"radius,omitempty"`
 	Opacity     *int       `json:"opacity,omitempty"`
+	BlendMode   string     `json:"blendMode,omitempty"`
 	Padding     PaddingBox `json:"padding,omitempty"`
 	Font        string     `json:"font,omitempty"`
 	LineSpace   int        `json:"lineSpace,omitempty"`
@@ -203,7 +206,7 @@ func GenerateC(doc ProjectDoc) ([]generatedFile, error) {
 		uiCBody.WriteString("}\n")
 	}
 
-	if err := validateEventBindings(doc.Events, screenSymbols); err != nil {
+	if err := validateEventBindings(doc.Events, screenSymbols, generatedCSymbols(doc, styleSymbols, assetSymbols)); err != nil {
 		return nil, err
 	}
 	for _, callbackName := range uniqueEventCallbackNames(doc.Events) {
@@ -349,6 +352,9 @@ func writeReusableStyleProperties(uiC *strings.Builder, symbol string, style Wid
 	if style.Opacity != nil {
 		uiC.WriteString(fmt.Sprintf("    lv_style_set_opa(&%s, %s);\n", symbol, opacityConstant(*style.Opacity)))
 	}
+	if style.BlendMode != "" && style.BlendMode != "normal" {
+		uiC.WriteString(fmt.Sprintf("    lv_style_set_blend_mode(&%s, %s);\n", symbol, blendModeConstant(style.BlendMode)))
+	}
 	if style.Padding.Top != 0 {
 		uiC.WriteString(fmt.Sprintf("    lv_style_set_pad_top(&%s, %d);\n", symbol, style.Padding.Top))
 	}
@@ -390,6 +396,9 @@ func writeWidgetProperties(uiC *strings.Builder, symbol string, widget WidgetNod
 			uiC.WriteString(fmt.Sprintf("    lv_obj_add_state(%s, LV_STATE_CHECKED);\n", symbol))
 		}
 	case "dropdown":
+		if text, ok := widget.Props["text"].(string); ok {
+			uiC.WriteString(fmt.Sprintf("    lv_dropdown_set_text(%s, %q);\n", symbol, text))
+		}
 		if options, ok := widget.Props["options"].(string); ok {
 			uiC.WriteString(fmt.Sprintf("    lv_dropdown_set_options(%s, %q);\n", symbol, options))
 		}
@@ -621,6 +630,13 @@ func writeStyle(uiC *strings.Builder, symbol string, style WidgetStyle) {
 			opacityConstant(*style.Opacity),
 		))
 	}
+	if style.BlendMode != "" && style.BlendMode != "normal" {
+		uiC.WriteString(fmt.Sprintf(
+			"    lv_obj_set_style_blend_mode(%s, %s, LV_PART_MAIN | LV_STATE_DEFAULT);\n",
+			symbol,
+			blendModeConstant(style.BlendMode),
+		))
+	}
 	if style.Padding.Top != 0 {
 		uiC.WriteString(fmt.Sprintf("    lv_obj_set_style_pad_top(%s, %d, LV_PART_MAIN | LV_STATE_DEFAULT);\n", symbol, style.Padding.Top))
 	}
@@ -790,7 +806,8 @@ func sanitizeCComment(value string) string {
 }
 
 func exportReadme(doc ProjectDoc) string {
-	return fmt.Sprintf(`# %s LVGL Export
+	var readme strings.Builder
+	readme.WriteString(fmt.Sprintf(`# %s LVGL Export
 
 Generated for LVGL %s.
 
@@ -799,9 +816,39 @@ Files:
 - ui.h
 - assets.c
 - assets.h
+- README.md
 
 Integrate these files into your LVGL project and call the generated screen init function.
-`, doc.Name, doc.Target.LvglVersion)
+
+## Preserving user code
+
+These generated files are overwritten on each export; keep handwritten application logic outside %s, and implement event callbacks in separate source files or delegate from the generated callback stubs into your own functions before re-exporting.
+`, doc.Name, doc.Target.LvglVersion, "`ui.c`"))
+	fonts := fontAssets(doc.Assets)
+	if len(fonts) > 0 {
+		readme.WriteString("\n## Font assets\n\n")
+		readme.WriteString("Uploaded font assets are exported as metadata only. Convert each uploaded font with the LVGL font converter, add the generated font source to your firmware project, then replace the font asset id referenced in `ui.c` with the generated LVGL font symbol.\n\n")
+		for _, asset := range fonts {
+			readme.WriteString(fmt.Sprintf("- `%s` %s (%s, %d bytes)\n", asset.ID, asset.Name, asset.MimeType, asset.SizeBytes))
+		}
+	}
+	return readme.String()
+}
+
+func fontAssets(assets []AssetRef) []AssetRef {
+	fonts := make([]AssetRef, 0)
+	for _, asset := range assets {
+		if asset.Kind == "font" {
+			fonts = append(fonts, asset)
+		}
+	}
+	sort.Slice(fonts, func(i, j int) bool {
+		if fonts[i].Name == fonts[j].Name {
+			return fonts[i].ID < fonts[j].ID
+		}
+		return fonts[i].Name < fonts[j].Name
+	})
+	return fonts
 }
 
 func cleanHexColor(value string) (string, bool) {
@@ -858,10 +905,26 @@ func textAlignConstant(value string) string {
 	}
 }
 
+func blendModeConstant(value string) string {
+	switch strings.ToLower(value) {
+	case "additive":
+		return "LV_BLEND_MODE_ADDITIVE"
+	case "subtractive":
+		return "LV_BLEND_MODE_SUBTRACTIVE"
+	case "multiply":
+		return "LV_BLEND_MODE_MULTIPLY"
+	case "replace":
+		return "LV_BLEND_MODE_REPLACE"
+	default:
+		return "LV_BLEND_MODE_NORMAL"
+	}
+}
+
 func assetSymbolMap(assets []AssetRef) map[string]string {
 	symbols := map[string]string{}
+	names := newNameRegistry()
 	for _, asset := range assets {
-		symbols[asset.ID] = "ui_img_" + sanitizeIdentifier(asset.Name)
+		symbols[asset.ID] = names.Symbol("img_" + asset.Name)
 	}
 	return symbols
 }
@@ -882,11 +945,17 @@ func eventBindingMap(events []EventBinding) map[string][]EventBinding {
 	return bindings
 }
 
-func validateEventBindings(events []EventBinding, symbols map[string]string) error {
+func validateEventBindings(events []EventBinding, symbols map[string]string, reservedSymbols map[string]struct{}) error {
+	eventIDs := map[string]struct{}{}
+	callbackSymbols := map[string]string{}
 	for _, event := range events {
 		if strings.TrimSpace(event.ID) == "" {
 			return fmt.Errorf("event id is required")
 		}
+		if _, ok := eventIDs[event.ID]; ok {
+			return fmt.Errorf("event id must be unique: %s", event.ID)
+		}
+		eventIDs[event.ID] = struct{}{}
 		if strings.TrimSpace(event.WidgetID) == "" {
 			return fmt.Errorf("event widgetId is required: %s", event.ID)
 		}
@@ -899,8 +968,57 @@ func validateEventBindings(events []EventBinding, symbols map[string]string) err
 		if strings.TrimSpace(event.HandlerName) == "" {
 			return fmt.Errorf("event handlerName is required: %s", event.ID)
 		}
+		handlerName := strings.TrimSpace(event.HandlerName)
+		callbackName := sanitizeIdentifier(handlerName)
+		if _, ok := reservedSymbols[callbackName]; ok {
+			return fmt.Errorf("event handlerName collides with generated C symbol: %s", callbackName)
+		}
+		if previousHandler, ok := callbackSymbols[callbackName]; ok && previousHandler != handlerName {
+			return fmt.Errorf("event handlerName must generate a unique C callback symbol: %s", callbackName)
+		}
+		callbackSymbols[callbackName] = handlerName
 	}
 	return nil
+}
+
+func generatedCSymbols(doc ProjectDoc, styleSymbols map[string]string, assetSymbols map[string]string) map[string]struct{} {
+	reserved := map[string]struct{}{
+		"ui_init_styles": {},
+	}
+	for _, symbol := range styleSymbols {
+		reserved[symbol] = struct{}{}
+	}
+	for _, symbol := range assetSymbols {
+		reserved[symbol] = struct{}{}
+		reserved[symbol+"_data"] = struct{}{}
+	}
+	names := newNameRegistry()
+	for _, screen := range doc.Screens {
+		symbol := names.Symbol(screen.Name)
+		reserved[symbol] = struct{}{}
+		reserved[symbol+"_screen_init"] = struct{}{}
+		for _, child := range screen.Root.Children {
+			collectWidgetCSymbols(child, names, reserved)
+		}
+	}
+	return reserved
+}
+
+func collectWidgetCSymbols(widget WidgetNode, names *nameRegistry, reserved map[string]struct{}) {
+	symbol := names.Symbol(widget.Name)
+	reserved[symbol] = struct{}{}
+	if _, ok := widget.Props["text"].(string); ok && widget.Type == "button" {
+		reserved[names.Symbol(widget.Name+"_Label")] = struct{}{}
+	}
+	if widget.Type == "line" {
+		reserved[symbol+"_points"] = struct{}{}
+	}
+	if widget.Type == "chart" {
+		reserved[symbol+"_series"] = struct{}{}
+	}
+	for _, child := range widget.Children {
+		collectWidgetCSymbols(child, names, reserved)
+	}
 }
 
 func validateProjectDoc(doc ProjectDoc) error {
@@ -919,6 +1037,9 @@ func validateProjectDoc(doc ProjectDoc) error {
 	if strings.TrimSpace(doc.UpdatedAt) == "" {
 		return fmt.Errorf("ProjectDoc updatedAt is required")
 	}
+	if !isUTCDateTime(doc.UpdatedAt) {
+		return fmt.Errorf("ProjectDoc updatedAt must be a UTC date-time string")
+	}
 	if doc.Styles == nil {
 		return fmt.Errorf("ProjectDoc styles is required")
 	}
@@ -931,14 +1052,15 @@ func validateProjectDoc(doc ProjectDoc) error {
 	if err := validateTarget(doc.Target); err != nil {
 		return err
 	}
-	assetIDs, err := validateAssets(doc.ID, doc.Assets)
+	assetRefs, err := validateAssets(doc.ID, doc.Assets)
 	if err != nil {
 		return err
 	}
-	if err := validateStyles(doc.Styles); err != nil {
+	if err := validateStyles(doc.Styles, assetRefs); err != nil {
 		return err
 	}
 	screenIDs := map[string]struct{}{}
+	projectWidgetIDs := map[string]struct{}{}
 	for _, screen := range doc.Screens {
 		if strings.TrimSpace(screen.ID) == "" {
 			return fmt.Errorf("screen id is required")
@@ -954,14 +1076,14 @@ func validateProjectDoc(doc ProjectDoc) error {
 			return fmt.Errorf("screen root widget type must be screen")
 		}
 		ids := map[string]struct{}{}
-		if err := validateWidgetTree(screen.Root, nil, ids, assetIDs); err != nil {
+		if err := validateWidgetTree(screen.Root, nil, ids, projectWidgetIDs, assetRefs); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateStyles(styles []StyleDef) error {
+func validateStyles(styles []StyleDef, assetRefs map[string]AssetRef) error {
 	styleIDs := map[string]struct{}{}
 	for _, style := range styles {
 		if strings.TrimSpace(style.ID) == "" {
@@ -976,6 +1098,11 @@ func validateStyles(styles []StyleDef) error {
 		}
 		if err := validateStyle(style.ID, style.Style); err != nil {
 			return err
+		}
+		if style.Style.Font != "" && !isBuiltInLvglFont(style.Style.Font) {
+			if err := validateFontAssetKind(style.Style.Font, assetRefs); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1003,13 +1130,13 @@ func validateTarget(target TargetConfig) error {
 	return nil
 }
 
-func validateAssets(projectID string, assets []AssetRef) (map[string]struct{}, error) {
-	assetIDs := map[string]struct{}{}
+func validateAssets(projectID string, assets []AssetRef) (map[string]AssetRef, error) {
+	assetRefs := map[string]AssetRef{}
 	for _, asset := range assets {
 		if strings.TrimSpace(asset.ID) == "" {
 			return nil, fmt.Errorf("asset id is required")
 		}
-		if _, ok := assetIDs[asset.ID]; ok {
+		if _, ok := assetRefs[asset.ID]; ok {
 			return nil, fmt.Errorf("asset id must be unique: %s", asset.ID)
 		}
 		if strings.TrimSpace(asset.ProjectID) == "" {
@@ -1027,6 +1154,12 @@ func validateAssets(projectID string, assets []AssetRef) (map[string]struct{}, e
 		if strings.TrimSpace(asset.MimeType) == "" {
 			return nil, fmt.Errorf("asset mimeType is required: %s", asset.ID)
 		}
+		if asset.Kind == "image" && !isSupportedImageMimeType(asset.MimeType) {
+			return nil, fmt.Errorf("unsupported image asset mimeType: %s", asset.ID)
+		}
+		if asset.Kind == "font" && !isSupportedFontMimeType(asset.MimeType) {
+			return nil, fmt.Errorf("unsupported font asset mimeType: %s", asset.ID)
+		}
 		if asset.Width < 0 {
 			return nil, fmt.Errorf("asset width must be non-negative: %s", asset.ID)
 		}
@@ -1042,12 +1175,44 @@ func validateAssets(projectID string, assets []AssetRef) (map[string]struct{}, e
 		if strings.TrimSpace(asset.CreatedAt) == "" {
 			return nil, fmt.Errorf("asset createdAt is required: %s", asset.ID)
 		}
-		assetIDs[asset.ID] = struct{}{}
+		if !isUTCDateTime(asset.CreatedAt) {
+			return nil, fmt.Errorf("asset createdAt must be a UTC date-time string: %s", asset.ID)
+		}
+		if asset.Kind == "image" && len(asset.Data) == 0 {
+			return nil, fmt.Errorf("image asset data is required: %s", asset.ID)
+		}
+		if asset.Kind == "image" && len(asset.Data) > 0 {
+			if _, _, err := image.DecodeConfig(bytes.NewReader(asset.Data)); err != nil && (asset.Width <= 0 || asset.Height <= 0) {
+				return nil, fmt.Errorf("image asset width and height are required when raw data cannot be decoded: %s", asset.ID)
+			}
+		}
+		assetRefs[asset.ID] = asset
 	}
-	return assetIDs, nil
+	return assetRefs, nil
 }
 
-func validateWidgetTree(widget WidgetNode, expectedParentID *string, ids map[string]struct{}, assetIDs map[string]struct{}) error {
+func isSupportedImageMimeType(mimeType string) bool {
+	return mimeType == "image/png" || mimeType == "image/jpeg"
+}
+
+func isSupportedFontMimeType(mimeType string) bool {
+	switch mimeType {
+	case "font/ttf", "font/otf", "font/woff", "font/woff2":
+		return true
+	default:
+		return false
+	}
+}
+
+func isUTCDateTime(value string) bool {
+	if !strings.HasSuffix(value, "Z") {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, value)
+	return err == nil
+}
+
+func validateWidgetTree(widget WidgetNode, expectedParentID *string, ids map[string]struct{}, projectWidgetIDs map[string]struct{}, assetRefs map[string]AssetRef) error {
 	if strings.TrimSpace(widget.ID) == "" {
 		return fmt.Errorf("widget id is required")
 	}
@@ -1055,6 +1220,10 @@ func validateWidgetTree(widget WidgetNode, expectedParentID *string, ids map[str
 		return fmt.Errorf("widget id must be unique within a screen: %s", widget.ID)
 	}
 	ids[widget.ID] = struct{}{}
+	if _, ok := projectWidgetIDs[widget.ID]; ok {
+		return fmt.Errorf("widget id must be unique across project: %s", widget.ID)
+	}
+	projectWidgetIDs[widget.ID] = struct{}{}
 	if !sameParentID(widget.ParentID, expectedParentID) {
 		return fmt.Errorf("widget parentId must be %s", parentIDLabel(expectedParentID))
 	}
@@ -1064,7 +1233,7 @@ func validateWidgetTree(widget WidgetNode, expectedParentID *string, ids map[str
 	if strings.TrimSpace(widget.Name) == "" {
 		return fmt.Errorf("widget name is required: %s", widget.ID)
 	}
-	if err := validateLayout(widget.ID, widget.Layout); err != nil {
+	if err := validateLayout(widget.ID, widget.Type, widget.Layout); err != nil {
 		return err
 	}
 	if err := validateStyle(widget.ID, widget.Style); err != nil {
@@ -1075,25 +1244,46 @@ func validateWidgetTree(widget WidgetNode, expectedParentID *string, ids map[str
 	}
 	if widget.Type == "image" {
 		if assetID, ok := widget.Props["assetId"].(string); ok && assetID != "" {
-			if _, exists := assetIDs[assetID]; !exists {
+			asset, exists := assetRefs[assetID]
+			if !exists {
 				return fmt.Errorf("image widget references missing asset: %s", assetID)
+			}
+			if asset.Kind != "image" {
+				return fmt.Errorf("image widget must reference an image asset: %s", assetID)
+			}
+			if len(asset.Data) == 0 {
+				return fmt.Errorf("image asset data is required: %s", assetID)
 			}
 		}
 	}
 	if widget.Style.Font != "" && !isBuiltInLvglFont(widget.Style.Font) {
-		if _, exists := assetIDs[widget.Style.Font]; !exists {
-			return fmt.Errorf("font style references missing asset: %s", widget.Style.Font)
+		if err := validateFontAssetKind(widget.Style.Font, assetRefs); err != nil {
+			return err
 		}
 	}
 	for _, child := range widget.Children {
-		if err := validateWidgetTree(child, &widget.ID, ids, assetIDs); err != nil {
+		if err := validateWidgetTree(child, &widget.ID, ids, projectWidgetIDs, assetRefs); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func validateFontAssetKind(font string, assetRefs map[string]AssetRef) error {
+	asset, exists := assetRefs[font]
+	if !exists {
+		return fmt.Errorf("font style references missing asset: %s", font)
+	}
+	if asset.Kind != "font" {
+		return fmt.Errorf("font style must reference a font asset: %s", font)
+	}
+	return nil
+}
+
 func validateWidgetProps(widget WidgetNode) error {
+	if err := validateWidgetPropTypes(widget); err != nil {
+		return err
+	}
 	switch widget.Type {
 	case "spinner":
 		if err := validatePositiveProp(widget, "spinTime"); err != nil {
@@ -1106,6 +1296,9 @@ func validateWidgetProps(widget WidgetNode) error {
 		if err := validatePositiveProp(widget, "pointCount"); err != nil {
 			return err
 		}
+		if err := validateRangeProps(widget); err != nil {
+			return err
+		}
 		if err := validateChartValuesProp(widget); err != nil {
 			return err
 		}
@@ -1113,10 +1306,142 @@ func validateWidgetProps(widget WidgetNode) error {
 		if err := validateNonNegativeProp(widget, "selected"); err != nil {
 			return err
 		}
+		if err := validateDropdownSelectedProp(widget); err != nil {
+			return err
+		}
 	case "slider", "bar", "arc":
 		if err := validateNonNegativeProp(widget, "value"); err != nil {
 			return err
 		}
+		if err := validateRangeProps(widget); err != nil {
+			return err
+		}
+		if err := validateRangeValueProp(widget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateWidgetPropTypes(widget WidgetNode) error {
+	switch widget.Type {
+	case "label", "button", "checkbox", "dropdown":
+		if err := validateStringProp(widget, "text"); err != nil {
+			return err
+		}
+	}
+	switch widget.Type {
+	case "checkbox", "switch":
+		if err := validateBoolProp(widget, "checked"); err != nil {
+			return err
+		}
+	case "image":
+		if err := validateStringProp(widget, "assetId"); err != nil {
+			return err
+		}
+	case "dropdown":
+		if err := validateStringProp(widget, "options"); err != nil {
+			return err
+		}
+		if err := validateNumberProp(widget, "selected"); err != nil {
+			return err
+		}
+	case "spinner":
+		if err := validateNumberProp(widget, "spinTime"); err != nil {
+			return err
+		}
+		if err := validateNumberProp(widget, "arcLength"); err != nil {
+			return err
+		}
+	case "chart":
+		for _, propName := range []string{"min", "max", "pointCount"} {
+			if err := validateNumberProp(widget, propName); err != nil {
+				return err
+			}
+		}
+	case "slider", "bar", "arc":
+		for _, propName := range []string{"min", "max", "value"} {
+			if err := validateNumberProp(widget, propName); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateNumberProp(widget WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists && !isFiniteNumericValue(value) {
+		return fmt.Errorf("widget prop %s must be a number: %s", propName, widget.ID)
+	}
+	if value, exists := widget.Props[propName]; exists && isFiniteNumericValue(value) && !isIntegerNumericValue(value) {
+		return fmt.Errorf("widget prop %s must be an integer: %s", propName, widget.ID)
+	}
+	return nil
+}
+
+func validateStringProp(widget WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists {
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("widget prop %s must be a string: %s", propName, widget.ID)
+		}
+	}
+	return nil
+}
+
+func validateBoolProp(widget WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists {
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("widget prop %s must be a boolean: %s", propName, widget.ID)
+		}
+	}
+	return nil
+}
+
+func validateDropdownSelectedProp(widget WidgetNode) error {
+	selected, hasSelected := intProp(widget.Props, "selected")
+	if !hasSelected || selected < 0 {
+		return nil
+	}
+	options := dropdownOptionList(widget.Props["options"])
+	if len(options) > 0 && selected >= len(options) {
+		return fmt.Errorf("widget prop selected must reference an available option: %s", widget.ID)
+	}
+	return nil
+}
+
+func dropdownOptionList(raw any) []string {
+	options, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	lines := strings.Split(strings.ReplaceAll(options, "\r\n", "\n"), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func validateRangeProps(widget WidgetNode) error {
+	min, hasMin := intProp(widget.Props, "min")
+	max, hasMax := intProp(widget.Props, "max")
+	if hasMin && hasMax && max <= min {
+		return fmt.Errorf("widget prop max must be greater than min: %s", widget.ID)
+	}
+	return nil
+}
+
+func validateRangeValueProp(widget WidgetNode) error {
+	value, hasValue := intProp(widget.Props, "value")
+	if !hasValue {
+		return nil
+	}
+	min := intPropOrDefault(widget.Props, "min", 0)
+	max := intPropOrDefault(widget.Props, "max", 100)
+	if max > min && (value < min || value > max) {
+		return fmt.Errorf("widget prop value must be between min and max: %s", widget.ID)
 	}
 	return nil
 }
@@ -1133,6 +1458,9 @@ func validateChartValuesProp(widget WidgetNode) error {
 	for _, value := range values {
 		if !isFiniteNumericValue(value) {
 			return fmt.Errorf("widget prop values must contain only finite numbers: %s", widget.ID)
+		}
+		if !isIntegerNumericValue(value) {
+			return fmt.Errorf("widget prop values must contain only integers: %s", widget.ID)
 		}
 	}
 	return nil
@@ -1151,6 +1479,26 @@ func isFiniteNumericValue(value any) bool {
 	}
 }
 
+func isIntegerNumericValue(value any) bool {
+	switch typed := value.(type) {
+	case int, int32, int64:
+		return true
+	case float32:
+		return !math.IsNaN(float64(typed)) && !math.IsInf(float64(typed), 0) && math.Trunc(float64(typed)) == float64(typed)
+	case float64:
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0) && math.Trunc(typed) == typed
+	default:
+		return false
+	}
+}
+
+func intPropOrDefault(props map[string]any, name string, fallback int) int {
+	if value, ok := intProp(props, name); ok {
+		return value
+	}
+	return fallback
+}
+
 func validatePositiveProp(widget WidgetNode, propName string) error {
 	value, ok := intProp(widget.Props, propName)
 	if ok && value <= 0 {
@@ -1167,7 +1515,7 @@ func validateNonNegativeProp(widget WidgetNode, propName string) error {
 	return nil
 }
 
-func validateLayout(widgetID string, layout LayoutBox) error {
+func validateLayout(widgetID string, widgetType string, layout LayoutBox) error {
 	if layout.Width <= 0 {
 		return fmt.Errorf("widget width must be greater than 0: %s", widgetID)
 	}
@@ -1180,6 +1528,9 @@ func validateLayout(widgetID string, layout LayoutBox) error {
 		}
 	}
 	if layout.Flex != nil {
+		if widgetType != "screen" && widgetType != "container" {
+			return fmt.Errorf("widget flex layout is only supported on screen and container widgets: %s", widgetID)
+		}
 		if _, ok := supportedFlexDirections[layout.Flex.Direction]; !ok {
 			return fmt.Errorf("unsupported flex direction: %s", layout.Flex.Direction)
 		}
@@ -1194,8 +1545,28 @@ func validateStyle(widgetID string, style WidgetStyle) error {
 	if style.Radius < 0 {
 		return fmt.Errorf("style radius must be non-negative: %s", widgetID)
 	}
+	if style.LetterSpace < 0 {
+		return fmt.Errorf("style letterSpace must be non-negative: %s", widgetID)
+	}
+	if style.LineSpace < 0 {
+		return fmt.Errorf("style lineSpace must be non-negative: %s", widgetID)
+	}
 	if style.Opacity != nil && (*style.Opacity < 0 || *style.Opacity > 100) {
 		return fmt.Errorf("style opacity must be between 0 and 100: %s", widgetID)
+	}
+	if style.BlendMode != "" {
+		if _, ok := supportedBlendModeValues[style.BlendMode]; !ok {
+			return fmt.Errorf("unsupported blend mode: %s", style.BlendMode)
+		}
+	}
+	if err := validateStyleColor(widgetID, "bgColor", style.BgColor); err != nil {
+		return err
+	}
+	if err := validateStyleColor(widgetID, "textColor", style.TextColor); err != nil {
+		return err
+	}
+	if err := validateStyleColor(widgetID, "borderColor", style.BorderColor); err != nil {
+		return err
 	}
 	if style.Padding.Top < 0 || style.Padding.Right < 0 || style.Padding.Bottom < 0 || style.Padding.Left < 0 {
 		return fmt.Errorf("style padding must be non-negative: %s", widgetID)
@@ -1204,6 +1575,16 @@ func validateStyle(widgetID string, style WidgetStyle) error {
 		if _, ok := supportedTextAlignValues[style.Align]; !ok {
 			return fmt.Errorf("unsupported text align: %s", style.Align)
 		}
+	}
+	return nil
+}
+
+func validateStyleColor(widgetID string, fieldName string, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if _, ok := cleanHexColor(value); !ok {
+		return fmt.Errorf("style %s must be a 3 or 6 digit hex color: %s", fieldName, widgetID)
 	}
 	return nil
 }
@@ -1246,6 +1627,14 @@ var supportedTextAlignValues = map[string]struct{}{
 	"left":   {},
 	"center": {},
 	"right":  {},
+}
+
+var supportedBlendModeValues = map[string]struct{}{
+	"normal":      {},
+	"additive":    {},
+	"subtractive": {},
+	"multiply":    {},
+	"replace":     {},
 }
 
 var supportedEventTypes = map[string]struct{}{

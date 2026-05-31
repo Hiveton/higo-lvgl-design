@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hiveton/lvgl-online-editor/apps/api/internal/codegen"
 )
 
 func TestRunWritesLvglExportZip(t *testing.T) {
@@ -115,9 +117,56 @@ func TestRunRejectsProjectDocMissingRequiredArrays(t *testing.T) {
 	}
 }
 
+func TestRunRejectsUnknownProjectDocFields(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "project.json")
+	output := filepath.Join(dir, "ui.zip")
+
+	project := `{
+		"schemaVersion": 1,
+		"id": "project-1",
+		"name": "CLI Export",
+		"theme": "dark",
+		"target": {"lvglVersion": "8.3", "deviceName": "Watch 480", "width": 480, "height": 480, "dpi": 326, "colorDepth": 16},
+		"screens": [{"id": "screen-1", "name": "Screen_1", "root": {"id": "root-1", "type": "screen", "name": "Screen_1", "parentId": null, "children": [], "layout": {"x": 0, "y": 0, "width": 480, "height": 480, "flex": {"direction": "row", "gap": 4, "wrap": false, "justify": "center"}}, "props": {}, "style": {"shadowColor": "#000000"}, "locked": false, "hidden": false}}],
+		"assets": [],
+		"styles": [],
+		"events": [],
+		"updatedAt": "2026-05-08T00:00:00Z"
+	}`
+	if err := os.WriteFile(input, []byte(project), 0o644); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	err := run([]string{"-input", input, "-output", output})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown field error, got %v", err)
+	}
+}
+
 func TestAssetPathRejectsTraversal(t *testing.T) {
 	_, err := assetPath(t.TempDir(), "../secret.png")
 	if err == nil {
 		t.Fatal("expected traversal object key to be rejected")
+	}
+}
+
+func TestAssetPathRejectsLocalObjectKey(t *testing.T) {
+	_, err := assetPath(t.TempDir(), "local://heart.png")
+	if err == nil || !strings.Contains(err.Error(), "local asset objectKey cannot be hydrated") {
+		t.Fatalf("expected local asset object key error, got %v", err)
+	}
+}
+
+func TestHydrateAssetsRejectsObjectKeyOutsideAssetProject(t *testing.T) {
+	err := hydrateAssets(t.TempDir(), []codegen.AssetRef{{
+		ID:        "asset-1",
+		ProjectID: "project-1",
+		Name:      "icon.png",
+		Kind:      "image",
+		ObjectKey: "projects/project-2/assets/asset-1/icon.png",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "asset objectKey must be under project asset scope") {
+		t.Fatalf("expected project scoped object key error, got %v", err)
 	}
 }

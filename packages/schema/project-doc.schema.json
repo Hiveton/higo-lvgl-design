@@ -64,7 +64,8 @@
     },
     "updatedAt": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "format": "date-time"
     }
   },
   "$defs": {
@@ -88,15 +89,15 @@
           "minLength": 1
         },
         "width": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0
         },
         "height": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0
         },
         "dpi": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0
         },
         "colorDepth": {
@@ -118,17 +119,17 @@
       "additionalProperties": false,
       "properties": {
         "x": {
-          "type": "number"
+          "type": "integer"
         },
         "y": {
-          "type": "number"
+          "type": "integer"
         },
         "width": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0
         },
         "height": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0
         },
         "align": {
@@ -161,7 +162,7 @@
           ]
         },
         "gap": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "wrap": {
@@ -174,21 +175,33 @@
       "additionalProperties": false,
       "properties": {
         "opacity": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0,
           "maximum": 100
         },
+        "blendMode": {
+          "enum": [
+            "normal",
+            "additive",
+            "subtractive",
+            "multiply",
+            "replace"
+          ]
+        },
         "bgColor": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^$|^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
         },
         "textColor": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^$|^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
         },
         "borderColor": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^$|^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
         },
         "radius": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "padding": {
@@ -198,10 +211,12 @@
           "type": "string"
         },
         "lineSpace": {
-          "type": "number"
+          "type": "integer",
+          "minimum": 0
         },
         "letterSpace": {
-          "type": "number"
+          "type": "integer",
+          "minimum": 0
         },
         "align": {
           "enum": [
@@ -223,19 +238,19 @@
       "additionalProperties": false,
       "properties": {
         "top": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "right": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "bottom": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "left": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         }
       }
@@ -305,7 +320,7 @@
                 "type": "string"
               },
               {
-                "type": "number"
+                "type": "integer"
               },
               {
                 "type": "boolean"
@@ -313,7 +328,7 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "number"
+                  "type": "integer"
                 }
               }
             ]
@@ -365,6 +380,54 @@
         "createdAt"
       ],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "image"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mimeType": {
+                "enum": [
+                  "image/png",
+                  "image/jpeg"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "font"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mimeType": {
+                "enum": [
+                  "font/ttf",
+                  "font/otf",
+                  "font/woff",
+                  "font/woff2"
+                ]
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -389,24 +452,26 @@
           "minLength": 1
         },
         "width": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "height": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "sizeBytes": {
-          "type": "number",
+          "type": "integer",
           "minimum": 0
         },
         "objectKey": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "^(local://.+|projects/[^/]+/assets/.+)$"
         },
         "createdAt": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "format": "date-time"
         }
       }
     },

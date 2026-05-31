@@ -91,6 +91,112 @@
               <option value="light">{{ copy.canvas.light }}</option>
             </select>
           </label>
+          <section class="project-styles-section" data-testid="project-styles-section">
+            <div class="settings-card-header compact">
+              <h2>{{ copy.canvas.reusableStyles }}</h2>
+              <button class="mini-action" type="button" data-testid="add-project-style-button" :aria-label="copy.canvas.addReusableStyle" :title="copy.canvas.addReusableStyle" @click="emit('add-project-style')"><IconGlyph name="add" /></button>
+            </div>
+            <p v-if="project.styles.length === 0" class="project-styles-empty" data-testid="project-styles-empty" role="status" aria-live="polite" aria-atomic="true">{{ copy.canvas.noReusableStyles }}</p>
+            <div v-for="styleDef in project.styles" :key="styleDef.id" class="project-style-editor" data-testid="project-style-editor">
+              <label>
+                {{ copy.canvas.styleName }}
+                <input data-testid="project-style-name-input" :aria-label="copy.canvas.reusableStyleName" :title="copy.canvas.reusableStyleName" :value="styleDef.name" @input="emitProjectStyleName(styleDef.id, $event)" />
+              </label>
+              <div class="settings-form-row">
+                <label class="color-field">
+                  {{ copy.canvas.background }}
+                  <span class="color-control">
+                    <span class="color-swatch" data-testid="project-style-bg-color-swatch" role="img" :aria-label="copy.inspector.colorPreview(copy.inspector.a11y.backgroundColor, styleDef.style.bgColor ?? 'transparent')" :title="copy.inspector.colorPreview(copy.inspector.a11y.backgroundColor, styleDef.style.bgColor ?? 'transparent')" :style="{ backgroundColor: styleDef.style.bgColor || 'transparent' }" />
+                    <input data-testid="project-style-bg-color-input" :aria-label="copy.inspector.a11y.backgroundColor" :title="copy.inspector.a11y.backgroundColor" :value="styleDef.style.bgColor ?? ''" :aria-invalid="projectStyleColorError(styleDef.id, 'bgColor') ? 'true' : undefined" :aria-describedby="projectStyleColorError(styleDef.id, 'bgColor') ? `project-style-${styleDef.id}-bg-color-error` : undefined" @input="emitProjectStyleText(styleDef.id, 'bgColor', $event)" />
+                  </span>
+                  <p v-if="projectStyleColorError(styleDef.id, 'bgColor')" :id="`project-style-${styleDef.id}-bg-color-error`" class="field-error" data-testid="project-style-bg-color-error" role="alert">{{ projectStyleColorError(styleDef.id, 'bgColor') }}</p>
+                </label>
+                <label class="color-field">
+                  {{ copy.canvas.textColor }}
+                  <span class="color-control">
+                    <span class="color-swatch" data-testid="project-style-text-color-swatch" role="img" :aria-label="copy.inspector.colorPreview(copy.inspector.a11y.textColor, styleDef.style.textColor ?? '#FFFFFF')" :title="copy.inspector.colorPreview(copy.inspector.a11y.textColor, styleDef.style.textColor ?? '#FFFFFF')" :style="{ backgroundColor: styleDef.style.textColor ?? '#FFFFFF' }" />
+                    <input data-testid="project-style-text-color-input" :aria-label="copy.inspector.a11y.textColor" :title="copy.inspector.a11y.textColor" :value="styleDef.style.textColor ?? ''" :aria-invalid="projectStyleColorError(styleDef.id, 'textColor') ? 'true' : undefined" :aria-describedby="projectStyleColorError(styleDef.id, 'textColor') ? `project-style-${styleDef.id}-text-color-error` : undefined" @input="emitProjectStyleText(styleDef.id, 'textColor', $event)" />
+                  </span>
+                  <p v-if="projectStyleColorError(styleDef.id, 'textColor')" :id="`project-style-${styleDef.id}-text-color-error`" class="field-error" data-testid="project-style-text-color-error" role="alert">{{ projectStyleColorError(styleDef.id, 'textColor') }}</p>
+                </label>
+              </div>
+              <div class="settings-form-row">
+                <label class="color-field">
+                  {{ copy.inspector.fields.border }}
+                  <span class="color-control">
+                    <span class="color-swatch" data-testid="project-style-border-color-swatch" role="img" :aria-label="copy.inspector.colorPreview(copy.inspector.a11y.borderColor, styleDef.style.borderColor ?? 'transparent')" :title="copy.inspector.colorPreview(copy.inspector.a11y.borderColor, styleDef.style.borderColor ?? 'transparent')" :style="{ backgroundColor: styleDef.style.borderColor || 'transparent' }" />
+                    <input data-testid="project-style-border-color-input" :aria-label="copy.inspector.a11y.borderColor" :title="copy.inspector.a11y.borderColor" :value="styleDef.style.borderColor ?? ''" :aria-invalid="projectStyleColorError(styleDef.id, 'borderColor') ? 'true' : undefined" :aria-describedby="projectStyleColorError(styleDef.id, 'borderColor') ? `project-style-${styleDef.id}-border-color-error` : undefined" @input="emitProjectStyleText(styleDef.id, 'borderColor', $event)" />
+                  </span>
+                  <p v-if="projectStyleColorError(styleDef.id, 'borderColor')" :id="`project-style-${styleDef.id}-border-color-error`" class="field-error" data-testid="project-style-border-color-error" role="alert">{{ projectStyleColorError(styleDef.id, 'borderColor') }}</p>
+                </label>
+                <label>
+                  {{ copy.inspector.fields.font }}
+                  <select data-testid="project-style-font-select" :aria-label="copy.inspector.a11y.textFont" :title="copy.inspector.a11y.textFont" :value="styleDef.style.font ?? ''" @change="emitProjectStyleText(styleDef.id, 'font', $event)">
+                    <option value="">{{ copy.inspector.fields.default }}</option>
+                    <option value="lv_font_montserrat_14">lv_font_montserrat_14</option>
+                    <option value="lv_font_montserrat_20">lv_font_montserrat_20</option>
+                    <option value="lv_font_montserrat_32">lv_font_montserrat_32</option>
+                    <option value="lv_font_montserrat_48">lv_font_montserrat_48</option>
+                    <option v-for="asset in fontAssets" :key="asset.id" :value="asset.id">{{ asset.name }}</option>
+                  </select>
+                </label>
+              </div>
+              <div class="settings-form-row">
+                <label>{{ copy.canvas.radius }}<input data-testid="project-style-radius-input" type="number" :aria-label="copy.canvas.radius" :title="copy.canvas.radius" min="0" step="1" :value="styleDef.style.radius ?? 0" :aria-invalid="projectStyleError(styleDef.id, 'radius') ? 'true' : undefined" :aria-describedby="projectStyleError(styleDef.id, 'radius') ? `project-style-${styleDef.id}-radius-error` : undefined" @input="emitProjectStyleNumber(styleDef.id, 'radius', $event)" />
+                  <p v-if="projectStyleError(styleDef.id, 'radius')" :id="`project-style-${styleDef.id}-radius-error`" class="field-error" data-testid="project-style-radius-error" role="alert">{{ projectStyleError(styleDef.id, 'radius') }}</p>
+                </label>
+                <label>{{ copy.canvas.opacity }}<input data-testid="project-style-opacity-input" type="number" :aria-label="copy.canvas.opacity" :title="copy.canvas.opacity" min="0" max="100" step="1" :value="styleDef.style.opacity ?? 100" :aria-invalid="projectStyleError(styleDef.id, 'opacity') ? 'true' : undefined" :aria-describedby="projectStyleError(styleDef.id, 'opacity') ? `project-style-${styleDef.id}-opacity-error` : undefined" @input="emitProjectStyleNumber(styleDef.id, 'opacity', $event)" />
+                  <p v-if="projectStyleError(styleDef.id, 'opacity')" :id="`project-style-${styleDef.id}-opacity-error`" class="field-error" data-testid="project-style-opacity-error" role="alert">{{ projectStyleError(styleDef.id, 'opacity') }}</p>
+                </label>
+                <label>
+                  {{ copy.inspector.fields.blendMode }}
+                  <select data-testid="project-style-blend-mode-select" :aria-label="copy.inspector.a11y.blendMode" :title="copy.inspector.a11y.blendMode" :value="styleDef.style.blendMode ?? 'normal'" @change="emitProjectStyleText(styleDef.id, 'blendMode', $event)">
+                    <option value="normal">{{ copy.inspector.options.blendMode.normal }}</option>
+                    <option value="additive">{{ copy.inspector.options.blendMode.additive }}</option>
+                    <option value="subtractive">{{ copy.inspector.options.blendMode.subtractive }}</option>
+                    <option value="multiply">{{ copy.inspector.options.blendMode.multiply }}</option>
+                    <option value="replace">{{ copy.inspector.options.blendMode.replace }}</option>
+                  </select>
+                </label>
+              </div>
+              <div class="settings-form-row">
+                <label>
+                  {{ copy.inspector.fields.align }}
+                  <select data-testid="project-style-align-select" :aria-label="copy.inspector.a11y.textAlignment" :title="copy.inspector.a11y.textAlignment" :value="styleDef.style.align ?? 'center'" @change="emitProjectStyleText(styleDef.id, 'align', $event)">
+                    <option value="left">{{ copy.inspector.options.textAlign.left }}</option>
+                    <option value="center">{{ copy.inspector.options.textAlign.center }}</option>
+                    <option value="right">{{ copy.inspector.options.textAlign.right }}</option>
+                  </select>
+                </label>
+                <label>{{ copy.inspector.fields.letterSpace }}<input data-testid="project-style-letter-space-input" type="number" :aria-label="copy.inspector.a11y.letterSpacing" :title="copy.inspector.a11y.letterSpacing" min="0" step="1" :value="styleDef.style.letterSpace ?? 0" :aria-invalid="projectStyleError(styleDef.id, 'letterSpace') ? 'true' : undefined" :aria-describedby="projectStyleError(styleDef.id, 'letterSpace') ? `project-style-${styleDef.id}-letter-space-error` : undefined" @input="emitProjectStyleNumber(styleDef.id, 'letterSpace', $event)" />
+                  <p v-if="projectStyleError(styleDef.id, 'letterSpace')" :id="`project-style-${styleDef.id}-letter-space-error`" class="field-error" data-testid="project-style-letter-space-error" role="alert">{{ projectStyleError(styleDef.id, 'letterSpace') }}</p>
+                </label>
+                <label>{{ copy.inspector.fields.lineSpace }}<input data-testid="project-style-line-space-input" type="number" :aria-label="copy.inspector.a11y.lineSpacing" :title="copy.inspector.a11y.lineSpacing" min="0" step="1" :value="styleDef.style.lineSpace ?? 0" :aria-invalid="projectStyleError(styleDef.id, 'lineSpace') ? 'true' : undefined" :aria-describedby="projectStyleError(styleDef.id, 'lineSpace') ? `project-style-${styleDef.id}-line-space-error` : undefined" @input="emitProjectStyleNumber(styleDef.id, 'lineSpace', $event)" />
+                  <p v-if="projectStyleError(styleDef.id, 'lineSpace')" :id="`project-style-${styleDef.id}-line-space-error`" class="field-error" data-testid="project-style-line-space-error" role="alert">{{ projectStyleError(styleDef.id, 'lineSpace') }}</p>
+                </label>
+              </div>
+              <div class="settings-form-row">
+                <label>{{ copy.inspector.fields.paddingTop }}<input data-testid="project-style-padding-top-input" type="number" :aria-label="copy.inspector.a11y.paddingTop" :title="copy.inspector.a11y.paddingTop" min="0" step="1" :value="styleDef.style.padding?.top ?? 0" :aria-invalid="projectStylePaddingError(styleDef.id, 'top') ? 'true' : undefined" :aria-describedby="projectStylePaddingError(styleDef.id, 'top') ? `project-style-${styleDef.id}-padding-top-error` : undefined" @input="emitProjectStylePaddingSide(styleDef.id, 'top', $event)" />
+                  <p v-if="projectStylePaddingError(styleDef.id, 'top')" :id="`project-style-${styleDef.id}-padding-top-error`" class="field-error" data-testid="project-style-padding-top-error" role="alert">{{ projectStylePaddingError(styleDef.id, 'top') }}</p>
+                </label>
+                <label>{{ copy.inspector.fields.paddingRight }}<input data-testid="project-style-padding-right-input" type="number" :aria-label="copy.inspector.a11y.paddingRight" :title="copy.inspector.a11y.paddingRight" min="0" step="1" :value="styleDef.style.padding?.right ?? 0" :aria-invalid="projectStylePaddingError(styleDef.id, 'right') ? 'true' : undefined" :aria-describedby="projectStylePaddingError(styleDef.id, 'right') ? `project-style-${styleDef.id}-padding-right-error` : undefined" @input="emitProjectStylePaddingSide(styleDef.id, 'right', $event)" />
+                  <p v-if="projectStylePaddingError(styleDef.id, 'right')" :id="`project-style-${styleDef.id}-padding-right-error`" class="field-error" data-testid="project-style-padding-right-error" role="alert">{{ projectStylePaddingError(styleDef.id, 'right') }}</p>
+                </label>
+              </div>
+              <div class="settings-form-row">
+                <label>{{ copy.inspector.fields.paddingBottom }}<input data-testid="project-style-padding-bottom-input" type="number" :aria-label="copy.inspector.a11y.paddingBottom" :title="copy.inspector.a11y.paddingBottom" min="0" step="1" :value="styleDef.style.padding?.bottom ?? 0" :aria-invalid="projectStylePaddingError(styleDef.id, 'bottom') ? 'true' : undefined" :aria-describedby="projectStylePaddingError(styleDef.id, 'bottom') ? `project-style-${styleDef.id}-padding-bottom-error` : undefined" @input="emitProjectStylePaddingSide(styleDef.id, 'bottom', $event)" />
+                  <p v-if="projectStylePaddingError(styleDef.id, 'bottom')" :id="`project-style-${styleDef.id}-padding-bottom-error`" class="field-error" data-testid="project-style-padding-bottom-error" role="alert">{{ projectStylePaddingError(styleDef.id, 'bottom') }}</p>
+                </label>
+                <label>{{ copy.inspector.fields.paddingLeft }}<input data-testid="project-style-padding-left-input" type="number" :aria-label="copy.inspector.a11y.paddingLeft" :title="copy.inspector.a11y.paddingLeft" min="0" step="1" :value="styleDef.style.padding?.left ?? 0" :aria-invalid="projectStylePaddingError(styleDef.id, 'left') ? 'true' : undefined" :aria-describedby="projectStylePaddingError(styleDef.id, 'left') ? `project-style-${styleDef.id}-padding-left-error` : undefined" @input="emitProjectStylePaddingSide(styleDef.id, 'left', $event)" />
+                  <p v-if="projectStylePaddingError(styleDef.id, 'left')" :id="`project-style-${styleDef.id}-padding-left-error`" class="field-error" data-testid="project-style-padding-left-error" role="alert">{{ projectStylePaddingError(styleDef.id, 'left') }}</p>
+                </label>
+              </div>
+              <div class="project-style-actions">
+                <button class="select-like" type="button" data-testid="apply-project-style-button" :disabled="!selectedWidget || selectedWidget.locked" :aria-label="copy.canvas.applyReusableStyle(styleDef.name, selectedWidget?.name)" :title="copy.canvas.applyReusableStyle(styleDef.name, selectedWidget?.name)" @click="emit('apply-project-style', styleDef.id)">{{ copy.canvas.apply }}</button>
+                <button class="mini-action" type="button" data-testid="delete-project-style-button" :aria-label="copy.canvas.deleteReusableStyle(styleDef.name)" :title="copy.canvas.deleteReusableStyle(styleDef.name)" @click="emit('delete-project-style', styleDef.id)"><IconGlyph name="trash" /></button>
+              </div>
+            </div>
+          </section>
         </div>
         <div class="settings-summary">
           <span>{{ copy.canvas.target }}</span>
@@ -169,7 +275,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import type { ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
+import type { AssetRef, ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
 import { useCopy } from "../i18n/useCopy";
 import IconGlyph from "./IconGlyph.vue";
 import WidgetRenderer from "./WidgetRenderer.vue";
@@ -190,6 +296,7 @@ const props = defineProps<{
   codeCopyStatus: string;
   deviceSurfaceStyle: Record<string, string>;
   gridEnabled: boolean;
+  fontAssets: AssetRef[];
   imagePreviewUrl: (widget: WidgetNode) => string | null;
   inspectorErrors: Record<string, string>;
   project: ProjectDoc;
@@ -209,8 +316,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "add-screen": [];
+  "add-project-style": [];
   "artboard-mounted": [element: HTMLElement];
+  "apply-project-style": [styleId: string];
   "copy-generated-code": [];
+  "delete-project-style": [styleId: string];
   "drop-widget": [event: DragEvent];
   "fit-view": [];
   "fullscreen-canvas": [];
@@ -227,6 +337,10 @@ const emit = defineEmits<{
   "update-target-lvgl-version": [value: string];
   "update-target-number": [field: "width" | "height" | "dpi", value: string];
   "update-theme": [theme: ProjectDoc["theme"]];
+  "update-project-style-name": [styleId: string, name: string];
+  "update-project-style-number": [styleId: string, field: "opacity" | "radius" | "letterSpace" | "lineSpace", value: string];
+  "update-project-style-padding-side": [styleId: string, side: "top" | "right" | "bottom" | "left", value: string];
+  "update-project-style-text": [styleId: string, field: "bgColor" | "textColor" | "borderColor" | "font" | "align" | "blendMode", value: string];
   "update:zoom-percent": [zoom: number];
 }>();
 
@@ -289,5 +403,37 @@ function emitTheme(event: Event): void {
   if (theme === "dark" || theme === "light") {
     emit("update-theme", theme);
   }
+}
+
+function emitProjectStyleName(styleId: string, event: Event): void {
+  emit("update-project-style-name", styleId, (event.target as HTMLInputElement).value);
+}
+
+function emitProjectStyleText(styleId: string, field: "bgColor" | "textColor" | "borderColor" | "font" | "align" | "blendMode", event: Event): void {
+  emit("update-project-style-text", styleId, field, (event.target as HTMLInputElement | HTMLSelectElement).value);
+}
+
+function emitProjectStyleNumber(styleId: string, field: "opacity" | "radius" | "letterSpace" | "lineSpace", event: Event): void {
+  emit("update-project-style-number", styleId, field, (event.target as HTMLInputElement).value);
+}
+
+function emitProjectStylePaddingSide(styleId: string, side: "top" | "right" | "bottom" | "left", event: Event): void {
+  emit("update-project-style-padding-side", styleId, side, (event.target as HTMLInputElement).value);
+}
+
+function projectStyleColorError(styleId: string, field: "bgColor" | "textColor" | "borderColor"): string | undefined {
+  return props.inspectorErrors[`project-style-${styleId}-${colorFieldErrorSuffix(field)}`];
+}
+
+function projectStyleError(styleId: string, field: "opacity" | "radius" | "letterSpace" | "lineSpace"): string | undefined {
+  return props.inspectorErrors[`project-style-${styleId}-${colorFieldErrorSuffix(field)}`];
+}
+
+function projectStylePaddingError(styleId: string, side: "top" | "right" | "bottom" | "left"): string | undefined {
+  return props.inspectorErrors[`project-style-${styleId}-padding-${side}`];
+}
+
+function colorFieldErrorSuffix(field: "bgColor" | "textColor" | "borderColor" | "opacity" | "radius" | "letterSpace" | "lineSpace"): string {
+  return field.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
 }
 </script>

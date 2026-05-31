@@ -7,10 +7,10 @@
       :auth-user="authUser"
       :build-status="buildStatus"
       :can-build-project="canBuildProject"
-      :can-copy-widget="projectStore.canCopySelectedWidget"
-      :can-delete-widget="projectStore.canDeleteSelectedWidget"
-      :can-paste-widget="projectStore.canPasteCopiedWidget"
-      :copied-widget-name="projectStore.copiedWidgetName"
+      :can-copy-widget="Boolean(selectedWidget && selectedWidget.type !== 'screen' && !selectedWidget.locked)"
+      :can-delete-widget="Boolean(selectedWidget && selectedWidget.type !== 'screen' && !selectedWidget.locked)"
+      :can-paste-widget="Boolean(clipboardStore.copiedWidget)"
+      :copied-widget-name="clipboardStore.copiedWidget?.widget.name"
       :can-redo="projectStore.canRedo"
       :can-undo="projectStore.canUndo"
       :project="project"
@@ -22,7 +22,7 @@
       @clear-auth-error="authStore.clearError"
       @copy-widget="projectStore.copySelectedWidget"
       @create-project="openNewProjectDialog"
-      @delete-widget="projectStore.deleteSelectedWidget"
+      @delete-widget="widgetStore.deleteSelectedWidget"
       @demo-login="loginDemo"
       @load-projects="loadProjectList"
       @login="loginWithPassword"
@@ -62,11 +62,11 @@
           :active-screen="activeScreen"
           :screens="project.screens"
           :has-duplicate-screen-names="hasDuplicateScreenNames"
-          @add-screen="projectStore.addScreen"
+          @add-screen="screenStore.addScreen"
           @delete-active-screen="deleteActiveScreen"
-          @duplicate-screen="projectStore.duplicateScreen"
-          @rename-screen="projectStore.renameScreen"
-          @switch-screen="projectStore.switchScreen"
+          @duplicate-screen="screenStore.duplicateScreen"
+          @rename-screen="screenStore.renameScreen"
+          @switch-screen="screenStore.switchScreen"
         />
       </LayersPanel>
 
@@ -80,6 +80,7 @@
         :code-preview="codePreview"
         :code-copy-status="codeCopyStatus"
         :device-surface-style="deviceSurfaceStyle"
+        :font-assets="fontAssets"
         :grid-enabled="gridEnabled"
         :image-preview-url="imagePreviewUrl"
         :inspector-errors="inspectorErrors"
@@ -95,9 +96,12 @@
         :widget-style="widgetStyle"
         :widget-text="widgetText"
         :zoom-levels="zoomLevels"
-        @add-screen="projectStore.addScreen"
+        @add-project-style="projectStore.addProjectStyle"
+        @add-screen="screenStore.addScreen"
+        @apply-project-style="projectStore.applyProjectStyleToSelectedWidget"
         @artboard-mounted="artboardRef = $event"
         @copy-generated-code="copyGeneratedCode"
+        @delete-project-style="projectStore.deleteProjectStyle"
         @drop-widget="dropWidgetOnCanvas"
         @fit-view="fitCanvasToView"
         @fullscreen-canvas="requestCanvasFullscreen"
@@ -113,6 +117,10 @@
         @update-target-lvgl-version="updateTargetLvglVersion"
         @update-target-number="updateTargetNumber"
         @update-theme="projectStore.updateTheme"
+        @update-project-style-name="projectStore.renameProjectStyle"
+        @update-project-style-number="updateProjectStyleNumber"
+        @update-project-style-padding-side="updateProjectStylePaddingSide"
+        @update-project-style-text="updateProjectStyleText"
         @update-mouse-coordinates="updateMouseCoordinates"
       />
 
@@ -144,6 +152,7 @@
         @update-prop-text="updatePropText"
         @update-prop-values="updateChartValues"
         @update-style-align="updateStyleAlign"
+        @update-style-blend-mode="updateStyleBlendMode"
         @update-style-font="updateStyleFont"
         @update-style-number="updateStyleNumber"
         @update-style-text="updateStyleText"
@@ -350,10 +359,13 @@ import { localizedErrorForCode, localizeError } from "../i18n/errors";
 import { useCopy } from "../i18n/useCopy";
 import { useAssetsStore } from "../stores/assets";
 import { useAuthStore } from "../stores/auth";
+import { useClipboardStore } from "../stores/clipboard";
 import { useJobsStore } from "../stores/jobs";
 import { useLocaleStore } from "../stores/locale";
 import { useProjectStore } from "../stores/project";
+import { useScreenStore } from "../stores/screen";
 import { useSimulatorStore } from "../stores/simulator";
+import { useWidgetStore } from "../stores/widget";
 import AssetsPanel from "./AssetsPanel.vue";
 import CanvasWorkspace, { type RenderedWidget } from "./CanvasWorkspace.vue";
 import InspectorPanel, { type InspectorTab } from "./InspectorPanel.vue";
@@ -372,16 +384,19 @@ import WidgetPalette from "./WidgetPalette.vue";
 const projectStore = useProjectStore();
 const assetsStore = useAssetsStore();
 const authStore = useAuthStore();
+const clipboardStore = useClipboardStore();
 const jobsStore = useJobsStore();
+const screenStore = useScreenStore();
 const simulatorStore = useSimulatorStore();
+const widgetStore = useWidgetStore();
 const localeStore = useLocaleStore();
 const copy = useCopy();
 const editorShellToken = ++nextEditorShellToken;
 const project = computed(() => projectStore.project);
-const activeScreen = computed(() => projectStore.activeScreen);
+const activeScreen = computed(() => screenStore.activeScreen);
 const selectedWidget = computed(() => projectStore.selectedWidget);
 const authUser = computed(() => authStore.user);
-const canBuildProject = computed(() => Boolean(authUser.value || getAuthToken()));
+const canBuildProject = computed(() => Boolean(authUser.value || authStore.tokenAvailable));
 const layerRows = computed<LayerRow[]>(() => flattenLayerRows(activeScreen.value?.root.children ?? []));
 const eventTargetRows = computed<LayerRow[]>(() =>
   activeScreen.value
@@ -404,6 +419,9 @@ const imageAssets = computed(() => project.value.assets.filter((asset) => asset.
 const fontAssets = computed(() => project.value.assets.filter((asset) => asset.kind === "font"));
 const assetUsageCounts = computed(() => {
   const usage: Record<string, number> = {};
+  for (const style of project.value.styles) {
+    countStyleAssetUsage(style.style, usage);
+  }
   for (const screen of project.value.screens) {
     countAssetUsage(screen.root, usage);
   }
@@ -491,6 +509,8 @@ const artboardRef = ref<HTMLElement | null>(null);
 const simulatorRuntime = ref<LvglRuntime | null>(null);
 const autosaveTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const simulatorRenderTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+let simulatorMountGeneration = 0;
+let simulatorMountInFlightGeneration: number | null = null;
 const activeCenterPanel = ref<"canvas" | "code" | "settings">("canvas");
 const activeNavItem = ref<SidebarNavItem>("widgets");
 const activeInspectorTab = ref<InspectorTab>("style");
@@ -621,6 +641,7 @@ onBeforeUnmount(() => {
   if (activeEditorShellToken === editorShellToken) {
     activeEditorShellToken = 0;
   }
+  simulatorMountGeneration += 1;
   document.removeEventListener("keydown", handleKeydown, { capture: true });
   document.removeEventListener("keyup", handleKeyup, { capture: true });
   document.removeEventListener("mousemove", handleCanvasMouseMove);
@@ -637,12 +658,19 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  project,
+  [
+    () => project.value.screens.length,
+    () => project.value.screens.map(s => `${s.id}:${s.root.children.length}`).join(","),
+    () => project.value.events.length,
+    () => project.value.styles.length,
+    () => project.value.assets.length,
+    () => project.value.theme,
+    () => project.value.updatedAt
+  ],
   () => {
     scheduleSimulatorRender();
     scheduleAutosave();
-  },
-  { deep: true }
+  }
 );
 
 watch(
@@ -748,7 +776,13 @@ function capturePreviewScreenshot(): void {
     appendLog(copy.value.runtime.previewScreenshotUnavailable, "10:21:10");
     return;
   }
-  previewScreenshotUrl.value = canvas.toDataURL("image/png");
+  const screenshotUrl = captureCanvasDataUrl(canvas);
+  if (!screenshotUrl) {
+    previewStatusMessage.value = copy.value.runtime.previewScreenshotUnavailable;
+    appendLog(copy.value.runtime.previewScreenshotUnavailable, "10:21:10");
+    return;
+  }
+  previewScreenshotUrl.value = screenshotUrl;
   previewStatusMessage.value = copy.value.runtime.previewScreenshotReady;
   appendLog(copy.value.runtime.previewScreenshotLogReady, "10:21:10");
 }
@@ -765,8 +799,21 @@ function captureSimulatorScreenshot(): void {
     appendLog(copy.value.runtime.simulatorScreenshotUnavailable, "10:21:10");
     return;
   }
-  simulatorScreenshotUrl.value = canvas.toDataURL("image/png");
+  const screenshotUrl = captureCanvasDataUrl(canvas);
+  if (!screenshotUrl) {
+    appendLog(copy.value.runtime.simulatorScreenshotUnavailable, "10:21:10");
+    return;
+  }
+  simulatorScreenshotUrl.value = screenshotUrl;
   appendLog(copy.value.runtime.simulatorScreenshotReady, "10:21:10");
+}
+
+function captureCanvasDataUrl(canvas: HTMLCanvasElement): string | null {
+  try {
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
 }
 
 function toggleSimulatorBackground(): void {
@@ -789,6 +836,7 @@ async function requestSimulatorFullscreen(): Promise<void> {
 }
 
 function handleSimulatorCanvasMounted(canvas: HTMLCanvasElement): void {
+  simulatorMountGeneration += 1;
   simulatorCanvas.value = canvas;
   void mountSimulator();
 }
@@ -796,6 +844,7 @@ function handleSimulatorCanvasMounted(canvas: HTMLCanvasElement): void {
 function toggleSimulatorPanel(): void {
   simulatorVisible.value = !simulatorVisible.value;
   if (!simulatorVisible.value) {
+    simulatorMountGeneration += 1;
     simulatorRuntime.value?.destroy();
     simulatorRuntime.value = null;
     simulatorCanvas.value = null;
@@ -915,13 +964,20 @@ async function copyGeneratedCode(): Promise<void> {
 
 async function writeClipboardText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
-    await Promise.race([
-      navigator.clipboard.writeText(text),
-      new Promise((_, reject) => {
-        window.setTimeout(() => reject(new Error(copy.value.runtime.clipboardWriteTimedOut)), 1200);
-      })
-    ]);
-    return;
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(text),
+        new Promise((_, reject) => {
+          window.setTimeout(() => reject(new Error(copy.value.runtime.clipboardWriteTimedOut)), 1200);
+        })
+      ]);
+      return;
+    } catch (error) {
+      if (copyTextWithSelection(text)) {
+        return;
+      }
+      throw error;
+    }
   }
   if (copyTextWithSelection(text)) {
     return;
@@ -969,7 +1025,7 @@ function logLoginResult(): void {
 }
 
 function addWidgetFromPalette(type: Exclude<WidgetNode["type"], "screen">): void {
-  projectStore.addWidgetFromCatalog(type, { x: 24, y: 32 });
+  widgetStore.addWidgetFromCatalog(type, { x: 24, y: 32 });
 }
 
 function dropWidgetOnCanvas(event: DragEvent): void {
@@ -986,7 +1042,7 @@ function dropWidgetOnCanvas(event: DragEvent): void {
     y: Math.max(0, snapCanvasValue((event.clientY - rect.top) / scale))
   };
   const targetContainer = findDropContainer(canvasPoint.x, canvasPoint.y);
-  projectStore.addWidgetFromCatalog(
+  widgetStore.addWidgetFromCatalog(
     catalogItem.type,
     targetContainer
       ? {
@@ -1115,7 +1171,10 @@ async function openProject(projectId: string): Promise<void> {
     return;
   }
   try {
-    await projectStore.openProject(projectId);
+    const opened = await projectStore.openProject(projectId);
+    if (!opened) {
+      return;
+    }
     await assetsStore.loadAssets(projectId);
     void renderSimulator();
     logEntries.value.push({
@@ -1144,6 +1203,9 @@ async function buildProject(): Promise<void> {
     const saved = await saveProjectWithLog();
     if (!saved) {
       throw new Error(copy.value.runtime.buildSaveFailed);
+    }
+    if (projectStore.dirty) {
+      throw new Error(copy.value.runtime.buildDirtyAfterSave);
     }
     if (isLocalOnlyProject()) {
       throw new Error(copy.value.runtime.buildSignInRequired);
@@ -1179,7 +1241,11 @@ async function downloadExportZip(): Promise<void> {
     link.click();
     link.remove();
     window.setTimeout(() => {
-      URL.revokeObjectURL?.(objectUrl);
+      try {
+        URL.revokeObjectURL?.(objectUrl);
+      } catch {
+        // Object URL cleanup is best-effort; the download has already completed.
+      }
     }, 1000);
     upsertLog("export-downloaded", "10:21:12", copy.value.runtime.exportZipDownloaded);
   } catch (error) {
@@ -1189,12 +1255,43 @@ async function downloadExportZip(): Promise<void> {
 
 async function saveProjectWithLog(): Promise<boolean> {
   const saved = await projectStore.saveProject();
-  if (saved) {
-    upsertLog("project-saved", "10:21:11", copy.value.runtime.projectSaved);
-    return true;
+  if (!saved) {
+    upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
+    return false;
   }
-  upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
-  return false;
+  const synced = await syncLocalAssetsToCloud();
+  if (!synced.ok) {
+    upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(assetsStore.error ?? copy.value.runtime.unknownError));
+    return false;
+  }
+  if (synced.changed) {
+    const resaved = await projectStore.saveProject();
+    if (!resaved) {
+      upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
+      return false;
+    }
+  }
+  upsertLog("project-saved", "10:21:11", copy.value.runtime.projectSaved);
+  return true;
+}
+
+async function syncLocalAssetsToCloud(): Promise<{ ok: boolean; changed: boolean }> {
+  if (isLocalOnlyProject()) {
+    return { ok: true, changed: false };
+  }
+  const localAssets = project.value.assets.filter((asset) => asset.objectKey.startsWith("local://"));
+  if (localAssets.length === 0) {
+    return { ok: true, changed: false };
+  }
+  for (const asset of localAssets) {
+    const uploaded = await assetsStore.uploadStoredLocalAsset(project.value.id, asset.id);
+    if (!uploaded) {
+      return { ok: false, changed: false };
+    }
+    projectStore.replaceAssetReference(uploaded.oldAssetId, uploaded.asset);
+    appendLog(copy.value.runtime.assetUploaded(uploaded.asset.name), "10:21:11");
+  }
+  return { ok: true, changed: true };
 }
 
 function logoutUser(): void {
@@ -1233,6 +1330,7 @@ function widgetStyle(item: RenderedWidget): Record<string, string> {
   const widget = item.widget;
   const padding = widget.style.padding;
   const opacity = widget.style.opacity === undefined ? 1 : widget.style.opacity / 100;
+  const fontSize = fontSizeForLvglFont(widget.style.font);
   return {
     left: `${item.x}px`,
     top: `${item.y}px`,
@@ -1247,9 +1345,19 @@ function widgetStyle(item: RenderedWidget): Record<string, string> {
       ? `${padding.top}px ${padding.right}px ${padding.bottom}px ${padding.left}px`
       : "0px",
     textAlign: widget.style.align ?? "center",
+    mixBlendMode: widget.style.blendMode ?? "normal",
+    ...(fontSize ? { fontSize } : {}),
     letterSpacing: `${widget.style.letterSpace ?? 0}px`,
     lineHeight: widget.style.lineSpace ? `${Math.max(1, widget.layout.height + widget.style.lineSpace)}px` : "normal"
   };
+}
+
+function fontSizeForLvglFont(font: string | undefined): string | undefined {
+  const match = /^lv_font_montserrat_(\d+)$/.exec(font ?? "");
+  if (!match) {
+    return undefined;
+  }
+  return `${Number(match[1])}px`;
 }
 
 function flattenLayerRows(widgets: WidgetNode[], depth = 0): LayerRow[] {
@@ -1374,11 +1482,15 @@ function countAssetUsage(widget: WidgetNode, usage: Record<string, number>): voi
   if (widget.type === "image" && typeof assetId === "string" && assetId) {
     usage[assetId] = (usage[assetId] ?? 0) + 1;
   }
-  if (typeof widget.style.font === "string" && widget.style.font) {
-    usage[widget.style.font] = (usage[widget.style.font] ?? 0) + 1;
-  }
+  countStyleAssetUsage(widget.style, usage);
   for (const child of widget.children) {
     countAssetUsage(child, usage);
+  }
+}
+
+function countStyleAssetUsage(style: WidgetNode["style"], usage: Record<string, number>): void {
+  if (typeof style.font === "string" && style.font) {
+    usage[style.font] = (usage[style.font] ?? 0) + 1;
   }
 }
 
@@ -1409,6 +1521,10 @@ function updateLayoutNumber(field: "x" | "y" | "width" | "height", rawValue: str
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
     setInspectorError(field, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(field, copy.value.inspector.errors.integer(inspectorFieldLabel(field)));
     return;
   }
   if ((field === "width" || field === "height") && value <= 0) {
@@ -1448,6 +1564,10 @@ function updateFlexGap(rawValue: string): void {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
     setInspectorError("gap", copy.value.inspector.errors.number(inspectorFieldLabel("gap")));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError("gap", copy.value.inspector.errors.integer(inspectorFieldLabel("gap")));
     return;
   }
   if (value < 0) {
@@ -1700,7 +1820,105 @@ function startCanvasPan(event: MouseEvent): void {
 }
 
 function updateStyleText(field: "textColor" | "bgColor" | "borderColor", value: string): void {
+  const errorField = styleColorErrorField(field);
+  if (!isValidStyleColor(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.hexColor(styleColorLabel(field)));
+    return;
+  }
+  clearInspectorError(errorField);
   projectStore.updateSelectedStyle({ [field]: value });
+}
+
+function updateProjectStyleText(styleId: string, field: "bgColor" | "textColor" | "borderColor" | "font" | "align" | "blendMode", value: string): void {
+  if (field === "bgColor" || field === "textColor" || field === "borderColor") {
+    const errorField = projectStyleColorErrorField(styleId, field);
+    if (!isValidStyleColor(value)) {
+      setInspectorError(errorField, copy.value.inspector.errors.hexColor(styleColorLabel(field)));
+      return;
+    }
+    clearInspectorError(errorField);
+  }
+  if (field === "blendMode" && !isBlendMode(value)) {
+    return;
+  }
+  projectStore.updateProjectStyleText(styleId, field, value);
+}
+
+function updateProjectStyleNumber(styleId: string, field: "opacity" | "radius" | "letterSpace" | "lineSpace", rawValue: string): void {
+  const value = Number(rawValue);
+  const errorField = projectStyleNumberErrorField(styleId, field);
+  if (!Number.isFinite(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.number(projectStyleNumberLabel(field)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.integer(projectStyleNumberLabel(field)));
+    return;
+  }
+  if (field === "opacity" && (value < 0 || value > 100)) {
+    setInspectorError(errorField, copy.value.inspector.errors.range(projectStyleNumberLabel(field), 0, 100));
+    return;
+  }
+  if (field !== "opacity" && value < 0) {
+    setInspectorError(errorField, copy.value.inspector.errors.nonNegative(projectStyleNumberLabel(field)));
+    return;
+  }
+  clearInspectorError(errorField);
+  projectStore.updateProjectStyleNumber(styleId, field, rawValue);
+}
+
+function updateProjectStylePaddingSide(styleId: string, side: "top" | "right" | "bottom" | "left", rawValue: string): void {
+  const value = Number(rawValue);
+  const field = `padding-${side}` as const;
+  const errorField = `project-style-${styleId}-${field}`;
+  if (!Number.isFinite(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.integer(inspectorFieldLabel(field)));
+    return;
+  }
+  if (value < 0) {
+    setInspectorError(errorField, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(field)));
+    return;
+  }
+  clearInspectorError(errorField);
+  projectStore.updateProjectStylePaddingSide(styleId, side, rawValue);
+}
+
+function isValidStyleColor(value: string): boolean {
+  return value.trim() === "" || /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim());
+}
+
+function styleColorErrorField(field: "textColor" | "bgColor" | "borderColor"): string {
+  return `style-${field.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)}`;
+}
+
+function projectStyleColorErrorField(styleId: string, field: "bgColor" | "textColor" | "borderColor"): string {
+  return `project-style-${styleId}-${field.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)}`;
+}
+
+function projectStyleNumberErrorField(styleId: string, field: "opacity" | "radius" | "letterSpace" | "lineSpace"): string {
+  return `project-style-${styleId}-${field.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)}`;
+}
+
+function projectStyleNumberLabel(field: "opacity" | "radius" | "letterSpace" | "lineSpace"): string {
+  if (field === "opacity" || field === "radius") {
+    return copy.value.canvas[field];
+  }
+  return inspectorFieldLabel(field);
+}
+
+function styleColorLabel(field: "textColor" | "bgColor" | "borderColor"): string {
+  const labels = copy.value.inspector.a11y;
+  if (field === "textColor") {
+    return labels.textColor;
+  }
+  if (field === "bgColor") {
+    return labels.backgroundColor;
+  }
+  return labels.borderColor;
 }
 
 function updateStyleNumber(field: "opacity" | "radius" | "letterSpace" | "lineSpace", rawValue: string): void {
@@ -1709,11 +1927,15 @@ function updateStyleNumber(field: "opacity" | "radius" | "letterSpace" | "lineSp
     setInspectorError(field, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
     return;
   }
+  if (!Number.isInteger(value)) {
+    setInspectorError(field, copy.value.inspector.errors.integer(inspectorFieldLabel(field)));
+    return;
+  }
   if (field === "opacity" && (value < 0 || value > 100)) {
     setInspectorError(field, copy.value.inspector.errors.range(inspectorFieldLabel(field), 0, 100));
     return;
   }
-  if (field === "radius" && value < 0) {
+  if (field !== "opacity" && value < 0) {
     setInspectorError(field, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(field)));
     return;
   }
@@ -1731,11 +1953,25 @@ function updateStyleAlign(value: string): void {
   }
 }
 
+function updateStyleBlendMode(value: string): void {
+  if (isBlendMode(value)) {
+    projectStore.updateSelectedStyle({ blendMode: value });
+  }
+}
+
+function isBlendMode(value: string): value is NonNullable<WidgetNode["style"]["blendMode"]> {
+  return value === "normal" || value === "additive" || value === "subtractive" || value === "multiply" || value === "replace";
+}
+
 function updatePropNumber(field: string, rawValue: string): void {
   const value = Number(rawValue);
   const errorField = propErrorField(field);
   if (!Number.isFinite(value)) {
     setInspectorError(errorField, copy.value.inspector.errors.number(inspectorFieldLabel(field)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.integer(inspectorFieldLabel(field)));
     return;
   }
   if ((field === "spinTime" || field === "arcLength" || field === "pointCount") && value <= 0) {
@@ -1746,6 +1982,25 @@ function updatePropNumber(field: string, rawValue: string): void {
     setInspectorError(errorField, copy.value.inspector.errors.nonNegative(inspectorFieldLabel(field)));
     return;
   }
+  if (field === "value" && rangeValueOutOfRange(value)) {
+    const [min, max] = selectedWidgetRangeBounds();
+    setInspectorError(errorField, copy.value.inspector.errors.range(inspectorFieldLabel(field), min, max));
+    return;
+  }
+  if (field === "selected" && dropdownSelectedOutOfRange(value)) {
+    const maxIndex = Math.max(0, dropdownOptionsForSelectedWidget().length - 1);
+    setInspectorError(errorField, copy.value.inspector.errors.range(inspectorFieldLabel(field), 0, maxIndex));
+    return;
+  }
+  if ((field === "min" || field === "max") && rangeBoundsInvalid(field, value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.greaterThan(inspectorFieldLabel("max"), inspectorFieldLabel("min")));
+    return;
+  }
+  if (field === "min") {
+    clearInspectorError("prop-max");
+  } else if (field === "max") {
+    clearInspectorError("prop-min");
+  }
   clearInspectorError(errorField);
   projectStore.updateSelectedProps({ [field]: value });
 }
@@ -1754,8 +2009,57 @@ function propErrorField(field: string): string {
   return `prop-${field.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)}`;
 }
 
+function rangeBoundsInvalid(field: string, value: number): boolean {
+  const widget = selectedWidget.value;
+  if (!widget || !["slider", "bar", "arc", "chart"].includes(widget.type)) {
+    return false;
+  }
+  const min = field === "min" ? value : numberProp(widget, "min", 0);
+  const max = field === "max" ? value : numberProp(widget, "max", 100);
+  return max <= min;
+}
+
+function rangeValueOutOfRange(value: number): boolean {
+  const widget = selectedWidget.value;
+  if (!widget || !["slider", "bar", "arc"].includes(widget.type)) {
+    return false;
+  }
+  const [min, max] = selectedWidgetRangeBounds();
+  return max > min && (value < min || value > max);
+}
+
+function selectedWidgetRangeBounds(): [number, number] {
+  const widget = selectedWidget.value;
+  if (!widget) {
+    return [0, 100];
+  }
+  return [numberProp(widget, "min", 0), numberProp(widget, "max", 100)];
+}
+
 function updatePropText(field: string, value: string): void {
+  if (field === "options" && selectedWidget.value?.type === "dropdown") {
+    const options = dropdownOptionsFromText(value);
+    const currentSelected = numberProp(selectedWidget.value, "selected", 0);
+    const selected = options.length > 0 ? Math.min(currentSelected, options.length - 1) : currentSelected;
+    clearInspectorError("prop-selected");
+    projectStore.updateSelectedProps({ options: value, selected });
+    return;
+  }
   projectStore.updateSelectedProps({ [field]: value });
+}
+
+function dropdownSelectedOutOfRange(selected: number): boolean {
+  const options = dropdownOptionsForSelectedWidget();
+  return options.length > 0 && selected >= options.length;
+}
+
+function dropdownOptionsForSelectedWidget(): string[] {
+  const widget = selectedWidget.value;
+  return widget?.type === "dropdown" ? dropdownOptionsFromText(String(widget.props.options ?? "")) : [];
+}
+
+function dropdownOptionsFromText(value: string): string[] {
+  return value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean);
 }
 
 function updatePropChecked(checked: boolean): void {
@@ -1774,6 +2078,10 @@ function updateChartValues(rawValue: string): void {
     setInspectorError("prop-values", copy.value.inspector.errors.chartValuesInvalid);
     return;
   }
+  if (values.some((value) => !Number.isInteger(value))) {
+    setInspectorError("prop-values", copy.value.inspector.errors.integer(inspectorFieldLabel("values")));
+    return;
+  }
   clearInspectorError("prop-values");
   projectStore.updateSelectedProps({ values, pointCount: values.length });
 }
@@ -1783,6 +2091,10 @@ function updatePaddingSide(side: "top" | "right" | "bottom" | "left", rawValue: 
   const errorField = `padding-${side}`;
   if (!Number.isFinite(value)) {
     setInspectorError(errorField, copy.value.inspector.errors.number(inspectorFieldLabel(`padding-${side}`)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(errorField, copy.value.inspector.errors.integer(inspectorFieldLabel(`padding-${side}`)));
     return;
   }
   if (value < 0) {
@@ -1825,6 +2137,8 @@ function inspectorFieldLabel(field: string): string {
     height: fields.height,
     letterSpace: fields.letterSpace,
     lineSpace: fields.lineSpace,
+    max: fields.max,
+    min: fields.min,
     opacity: fields.opacity,
     "padding-bottom": fields.paddingBottom,
     "padding-left": fields.paddingLeft,
@@ -1851,6 +2165,10 @@ function updateTargetNumber(field: "width" | "height" | "dpi", rawValue: string)
   }
   if (value <= 0) {
     setInspectorError(`target-${field}`, copy.value.inspector.errors.greaterThanZero(inspectorFieldLabel(field)));
+    return;
+  }
+  if (!Number.isInteger(value)) {
+    setInspectorError(`target-${field}`, copy.value.inspector.errors.integer(inspectorFieldLabel(field)));
     return;
   }
   clearInspectorError(`target-${field}`);
@@ -1895,29 +2213,131 @@ function generateCodePreview(): string {
   if (!screen) {
     return "";
   }
-  const missingImageAssetIds = findMissingImageAssetIds(screen.root, project.value.assets);
-  const missingFontAssetIds = findMissingFontAssetIds(screen.root, project.value.assets);
-  if (missingImageAssetIds.length || missingFontAssetIds.length) {
+  const assetIssues = findAssetReferenceIssues(screen.root, project.value.styles, project.value.assets);
+  if (
+    assetIssues.missingImageAssetIds.length
+    || assetIssues.invalidImageAssetIds.length
+    || assetIssues.missingFontAssetIds.length
+    || assetIssues.invalidFontAssetIds.length
+  ) {
     return [
-      ...missingImageAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingAsset(assetId)} */`),
-      ...missingFontAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingFontAsset(assetId)} */`)
+      ...assetIssues.missingImageAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingAsset(assetId)} */`),
+      ...assetIssues.invalidImageAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedInvalidAssetKind(assetId)} */`),
+      ...assetIssues.missingFontAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedMissingFontAsset(assetId)} */`),
+      ...assetIssues.invalidFontAssetIds.map((assetId) => `/* ${copy.value.runtime.codegenBlockedInvalidFontAssetKind(assetId)} */`)
     ].join("\n");
   }
   const names = createPreviewNameRegistry();
+  const styleSymbols = reusableStyleSymbolMap(project.value.styles);
+  const assetSymbols = assetSymbolMapForPreview(project.value.assets);
   const screenSymbol = names.symbol(screen.name);
   const globals = [`lv_obj_t * ${screenSymbol};`];
-  const lines = [`void ${screenSymbol}_screen_init(void) {`, `    ${screenSymbol} = lv_obj_create(NULL);`];
+  const lines: string[] = [];
+  appendReusableStylesPreview(lines, project.value.styles, styleSymbols);
+  lines.push(`void ${screenSymbol}_screen_init(void) {`);
+  if (project.value.styles.length > 0) {
+    lines.push("    ui_init_styles();");
+  }
+  lines.push(`    ${screenSymbol} = lv_obj_create(NULL);`);
   appendLayoutPreview(lines, screenSymbol, screen.root.layout);
+  appendStylePreview(lines, screenSymbol, screen.root);
   appendEventPreview(lines, screenSymbol, screen.root);
   for (const widget of screen.root.children) {
-    appendWidgetPreview(globals, lines, names, widget, screenSymbol);
+    appendWidgetPreview(globals, lines, names, assetSymbols, widget, screenSymbol);
   }
   lines.push("}");
   appendEventCallbackStubs(lines, screen.root);
   return [...globals, "", ...lines].join("\n");
 }
 
-function appendWidgetPreview(globals: string[], lines: string[], names: PreviewNameRegistry, widget: WidgetNode, parentSymbol: string): void {
+function reusableStyleSymbolMap(styles: ProjectDoc["styles"]): Map<string, string> {
+  const names = createPreviewNameRegistry();
+  return new Map(styles.map((style) => [style.id, names.symbol(`style_${style.name}`)]));
+}
+
+function assetSymbolMapForPreview(assets: AssetRef[]): Map<string, string> {
+  const names = createPreviewNameRegistry();
+  return new Map(assets.map((asset) => [asset.id, names.symbol(`img_${asset.name}`)]));
+}
+
+function appendReusableStylesPreview(lines: string[], styles: ProjectDoc["styles"], styleSymbols: Map<string, string>): void {
+  if (styles.length === 0) {
+    return;
+  }
+  for (const style of styles) {
+    lines.push(`static lv_style_t ${styleSymbols.get(style.id)};`);
+  }
+  lines.push("");
+  lines.push("static void ui_init_styles(void) {");
+  lines.push("    static int initialized = 0;");
+  lines.push("    if (initialized) {");
+  lines.push("        return;");
+  lines.push("    }");
+  lines.push("    initialized = 1;");
+  for (const style of styles) {
+    const symbol = styleSymbols.get(style.id);
+    if (!symbol) {
+      continue;
+    }
+    lines.push(`    lv_style_init(&${symbol});`);
+    appendReusableStylePropertiesPreview(lines, symbol, style.style);
+  }
+  lines.push("}");
+  lines.push("");
+}
+
+function appendReusableStylePropertiesPreview(lines: string[], symbol: string, style: ProjectDoc["styles"][number]["style"]): void {
+  const bgColor = cleanHexColorPreview(style.bgColor);
+  const textColor = cleanHexColorPreview(style.textColor);
+  const borderColor = cleanHexColorPreview(style.borderColor);
+  if (bgColor) {
+    lines.push(`    lv_style_set_bg_color(&${symbol}, lv_color_hex(0x${bgColor}));`);
+  }
+  if (textColor) {
+    lines.push(`    lv_style_set_text_color(&${symbol}, lv_color_hex(0x${textColor}));`);
+  }
+  if (borderColor) {
+    lines.push(`    lv_style_set_border_color(&${symbol}, lv_color_hex(0x${borderColor}));`);
+  }
+  if (style.font) {
+    appendReusableFontStylePreview(lines, symbol, style.font);
+  }
+  if (style.align) {
+    lines.push(`    lv_style_set_text_align(&${symbol}, ${textAlignConstant(style.align)});`);
+  }
+  if (typeof style.letterSpace === "number" && style.letterSpace !== 0) {
+    lines.push(`    lv_style_set_text_letter_space(&${symbol}, ${style.letterSpace});`);
+  }
+  if (typeof style.lineSpace === "number" && style.lineSpace !== 0) {
+    lines.push(`    lv_style_set_text_line_space(&${symbol}, ${style.lineSpace});`);
+  }
+  if (typeof style.radius === "number" && style.radius > 0) {
+    lines.push(`    lv_style_set_radius(&${symbol}, ${style.radius});`);
+  }
+  if (typeof style.opacity === "number") {
+    lines.push(`    lv_style_set_opa(&${symbol}, ${opacityConstantPreview(style.opacity)});`);
+  }
+  if (style.blendMode && style.blendMode !== "normal") {
+    lines.push(`    lv_style_set_blend_mode(&${symbol}, ${blendModeConstant(style.blendMode)});`);
+  }
+  const padding = style.padding;
+  if (padding) {
+    if (padding.top !== 0) lines.push(`    lv_style_set_pad_top(&${symbol}, ${padding.top});`);
+    if (padding.right !== 0) lines.push(`    lv_style_set_pad_right(&${symbol}, ${padding.right});`);
+    if (padding.bottom !== 0) lines.push(`    lv_style_set_pad_bottom(&${symbol}, ${padding.bottom});`);
+    if (padding.left !== 0) lines.push(`    lv_style_set_pad_left(&${symbol}, ${padding.left});`);
+  }
+}
+
+function appendReusableFontStylePreview(lines: string[], symbol: string, font: string): void {
+  if (isBuiltInLvglFont(font)) {
+    lines.push(`    lv_style_set_text_font(&${symbol}, &${sanitizeCIdentifier(font)});`);
+    return;
+  }
+  lines.push(`    /* Font asset ${sanitizeCComment(font)} is registered as metadata only; convert it to an LVGL font symbol before binding. */`);
+}
+
+function appendWidgetPreview(globals: string[], lines: string[], names: PreviewNameRegistry, assetSymbols: Map<string, string>, widget: WidgetNode, parentSymbol: string): void {
   const symbol = names.symbol(widget.name);
   globals.push(`lv_obj_t * ${symbol};`);
   lines.push(`    ${symbol} = ${createCallForPreview(widget, parentSymbol)};`);
@@ -1934,7 +2354,7 @@ function appendWidgetPreview(globals: string[], lines: string[], names: PreviewN
     lines.push(`    lv_label_set_text(${labelSymbol}, ${JSON.stringify(widget.props.text)});`);
     lines.push(`    lv_obj_center(${labelSymbol});`);
   }
-  appendImagePreview(lines, symbol, widget);
+  appendImagePreview(lines, symbol, widget, assetSymbols);
   appendWidgetPropertyPreview(lines, symbol, widget);
   appendStylePreview(lines, symbol, widget);
   appendEventPreview(lines, symbol, widget);
@@ -1942,7 +2362,7 @@ function appendWidgetPreview(globals: string[], lines: string[], names: PreviewN
     lines.push(`    lv_obj_add_flag(${symbol}, LV_OBJ_FLAG_HIDDEN);`);
   }
   for (const child of widget.children) {
-    appendWidgetPreview(globals, lines, names, child, symbol);
+    appendWidgetPreview(globals, lines, names, assetSymbols, child, symbol);
   }
 }
 
@@ -1960,49 +2380,80 @@ function appendLayoutPreview(lines: string[], symbol: string, layout: WidgetNode
   }
 }
 
-function appendImagePreview(lines: string[], symbol: string, widget: WidgetNode): void {
+function appendImagePreview(lines: string[], symbol: string, widget: WidgetNode, assetSymbols: Map<string, string>): void {
   if (widget.type !== "image" || typeof widget.props.assetId !== "string") {
     return;
   }
-  const asset = project.value.assets.find((item) => item.id === widget.props.assetId);
-  if (!asset) {
+  const assetSymbol = assetSymbols.get(widget.props.assetId);
+  if (!assetSymbol) {
     return;
   }
-  const assetSymbol = assetSymbolForPreview(asset.name);
   lines.push(`    lv_img_set_src(${symbol}, &${assetSymbol});`);
 }
 
-function findMissingImageAssetIds(widget: WidgetNode, assets: AssetRef[]): string[] {
-  const assetIds = new Set(assets.map((asset) => asset.id));
-  const missing = new Set<string>();
-  collectMissingImageAssetIds(widget, assetIds, missing);
-  return [...missing];
+type AssetReferenceIssues = {
+  missingImageAssetIds: string[];
+  invalidImageAssetIds: string[];
+  missingFontAssetIds: string[];
+  invalidFontAssetIds: string[];
+};
+
+function findAssetReferenceIssues(widget: WidgetNode, styles: ProjectDoc["styles"], assets: AssetRef[]): AssetReferenceIssues {
+  const assetKinds = new Map(assets.map((asset) => [asset.id, asset.kind]));
+  const missingImageAssetIds = new Set<string>();
+  const invalidImageAssetIds = new Set<string>();
+  const missingFontAssetIds = new Set<string>();
+  const invalidFontAssetIds = new Set<string>();
+  for (const style of styles) {
+    collectStyleFontAssetIssues(style.style, assetKinds, missingFontAssetIds, invalidFontAssetIds);
+  }
+  collectWidgetAssetIssues(widget, assetKinds, missingImageAssetIds, invalidImageAssetIds, missingFontAssetIds, invalidFontAssetIds);
+  return {
+    missingImageAssetIds: [...missingImageAssetIds],
+    invalidImageAssetIds: [...invalidImageAssetIds],
+    missingFontAssetIds: [...missingFontAssetIds],
+    invalidFontAssetIds: [...invalidFontAssetIds]
+  };
 }
 
-function findMissingFontAssetIds(widget: WidgetNode, assets: AssetRef[]): string[] {
-  const assetIds = new Set(assets.map((asset) => asset.id));
-  const missing = new Set<string>();
-  collectMissingFontAssetIds(widget, assetIds, missing);
-  return [...missing];
-}
-
-function collectMissingImageAssetIds(widget: WidgetNode, assetIds: Set<string>, missing: Set<string>): void {
+function collectWidgetAssetIssues(
+  widget: WidgetNode,
+  assetKinds: Map<string, AssetRef["kind"]>,
+  missingImageAssetIds: Set<string>,
+  invalidImageAssetIds: Set<string>,
+  missingFontAssetIds: Set<string>,
+  invalidFontAssetIds: Set<string>
+): void {
   const assetId = widget.props.assetId;
-  if (widget.type === "image" && typeof assetId === "string" && assetId && !assetIds.has(assetId)) {
-    missing.add(assetId);
+  if (widget.type === "image" && typeof assetId === "string" && assetId) {
+    const kind = assetKinds.get(assetId);
+    if (!kind) {
+      missingImageAssetIds.add(assetId);
+    } else if (kind !== "image") {
+      invalidImageAssetIds.add(assetId);
+    }
   }
+  collectStyleFontAssetIssues(widget.style, assetKinds, missingFontAssetIds, invalidFontAssetIds);
   for (const child of widget.children) {
-    collectMissingImageAssetIds(child, assetIds, missing);
+    collectWidgetAssetIssues(child, assetKinds, missingImageAssetIds, invalidImageAssetIds, missingFontAssetIds, invalidFontAssetIds);
   }
 }
 
-function collectMissingFontAssetIds(widget: WidgetNode, assetIds: Set<string>, missing: Set<string>): void {
-  const font = widget.style.font;
-  if (typeof font === "string" && font && !font.startsWith("lv_font_") && !assetIds.has(font)) {
-    missing.add(font);
+function collectStyleFontAssetIssues(
+  style: WidgetNode["style"],
+  assetKinds: Map<string, AssetRef["kind"]>,
+  missingFontAssetIds: Set<string>,
+  invalidFontAssetIds: Set<string>
+): void {
+  const font = style.font;
+  if (typeof font !== "string" || !font || isBuiltInLvglFont(font)) {
+    return;
   }
-  for (const child of widget.children) {
-    collectMissingFontAssetIds(child, assetIds, missing);
+  const kind = assetKinds.get(font);
+  if (!kind) {
+    missingFontAssetIds.add(font);
+  } else if (kind !== "font") {
+    invalidFontAssetIds.add(font);
   }
 }
 
@@ -2031,6 +2482,9 @@ function appendWidgetPropertyPreview(lines: string[], symbol: string, widget: Wi
       }
       break;
     case "dropdown":
+      if (typeof widget.props.text === "string") {
+        lines.push(`    lv_dropdown_set_text(${symbol}, ${JSON.stringify(widget.props.text)});`);
+      }
       if (typeof widget.props.options === "string") {
         lines.push(`    lv_dropdown_set_options(${symbol}, ${JSON.stringify(widget.props.options)});`);
       }
@@ -2083,6 +2537,9 @@ function appendStylePreview(lines: string[], symbol: string, widget: WidgetNode)
   }
   if (typeof widget.style.opacity === "number") {
     lines.push(`    lv_obj_set_style_opa(${symbol}, ${Math.round((Math.max(0, Math.min(100, widget.style.opacity)) * 255) / 100)}, LV_PART_MAIN | LV_STATE_DEFAULT);`);
+  }
+  if (widget.style.blendMode && widget.style.blendMode !== "normal") {
+    lines.push(`    lv_obj_set_style_blend_mode(${symbol}, ${blendModeConstant(widget.style.blendMode)}, LV_PART_MAIN | LV_STATE_DEFAULT);`);
   }
   if (widget.style.padding) {
     const padding = widget.style.padding;
@@ -2191,10 +2648,6 @@ function chartValuesProp(widget: WidgetNode): number[] {
   return Array.from({ length: pointCount }, (_unused, index) => min + ((index * 37 + 20) % (span + 1)));
 }
 
-function assetSymbolForPreview(name: string): string {
-  return `ui_img_${sanitizeCIdentifier(name)}`;
-}
-
 type PreviewNameRegistry = {
   symbol(name: string): string;
 };
@@ -2220,11 +2673,15 @@ function sanitizeCIdentifier(value: string): string {
 }
 
 function appendFontStylePreview(lines: string[], symbol: string, font: string): void {
-  if (font.startsWith("lv_font_")) {
+  if (isBuiltInLvglFont(font)) {
     lines.push(`    lv_obj_set_style_text_font(${symbol}, &${sanitizeCIdentifier(font)}, LV_PART_MAIN | LV_STATE_DEFAULT);`);
     return;
   }
   lines.push(`    /* Font asset ${sanitizeCComment(font)} is registered as metadata only; convert it to an LVGL font symbol before binding. */`);
+}
+
+function isBuiltInLvglFont(font: string): boolean {
+  return /^lv_font_montserrat_\d+$/.test(font);
 }
 
 function sanitizeCComment(value: string): string {
@@ -2246,6 +2703,31 @@ function textAlignConstant(align: NonNullable<WidgetNode["style"]["align"]>): st
     right: "LV_TEXT_ALIGN_RIGHT"
   };
   return constants[align];
+}
+
+function blendModeConstant(blendMode: NonNullable<WidgetNode["style"]["blendMode"]>): string {
+  const constants: Record<NonNullable<WidgetNode["style"]["blendMode"]>, string> = {
+    normal: "LV_BLEND_MODE_NORMAL",
+    additive: "LV_BLEND_MODE_ADDITIVE",
+    subtractive: "LV_BLEND_MODE_SUBTRACTIVE",
+    multiply: "LV_BLEND_MODE_MULTIPLY",
+    replace: "LV_BLEND_MODE_REPLACE"
+  };
+  return constants[blendMode];
+}
+
+function opacityConstantPreview(value: number): string {
+  if (value >= 100) return "LV_OPA_COVER";
+  if (value >= 90) return "LV_OPA_90";
+  if (value >= 80) return "LV_OPA_80";
+  if (value >= 70) return "LV_OPA_70";
+  if (value >= 60) return "LV_OPA_60";
+  if (value >= 50) return "LV_OPA_50";
+  if (value >= 40) return "LV_OPA_40";
+  if (value >= 30) return "LV_OPA_30";
+  if (value >= 20) return "LV_OPA_20";
+  if (value >= 10) return "LV_OPA_10";
+  return "LV_OPA_TRANSP";
 }
 
 function addSelectedEvent(): void {
@@ -2358,23 +2840,37 @@ function cancelAssetDelete(): void {
 
 async function deleteAssetNow(assetId: string): Promise<void> {
   const assetName = project.value.assets.find((asset) => asset.id === assetId)?.name ?? assetId;
-  const deleted = await assetsStore.deleteAsset(project.value.id, assetId);
-  if (deleted) {
-    projectStore.unregisterAsset(assetId);
-    appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
-    focusAssetToolbarAfterDelete();
-  }
-}
-
-async function deleteReferencedAssetNow(assetId: string): Promise<void> {
-  const assetName = project.value.assets.find((asset) => asset.id === assetId)?.name ?? assetId;
+  const localOnlyAsset = isLocalAsset(assetId);
   projectStore.unregisterAsset(assetId);
   const saved = await saveProjectWithLog();
   if (!saved) {
     projectStore.undo();
     return;
   }
-  const deleted = await assetsStore.deleteAsset(project.value.id, assetId);
+  const deleted = localOnlyAsset
+    ? assetsStore.deleteLocalAsset(assetId)
+    : await assetsStore.deleteAsset(project.value.id, assetId);
+  if (!deleted) {
+    projectStore.undo();
+    await saveProjectWithLog();
+    return;
+  }
+  appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
+  focusAssetToolbarAfterDelete();
+}
+
+async function deleteReferencedAssetNow(assetId: string): Promise<void> {
+  const assetName = project.value.assets.find((asset) => asset.id === assetId)?.name ?? assetId;
+  const localOnlyAsset = isLocalAsset(assetId);
+  projectStore.unregisterAsset(assetId);
+  const saved = await saveProjectWithLog();
+  if (!saved) {
+    projectStore.undo();
+    return;
+  }
+  const deleted = localOnlyAsset
+    ? assetsStore.deleteLocalAsset(assetId)
+    : await assetsStore.deleteAsset(project.value.id, assetId);
   if (!deleted) {
     projectStore.undo();
     await saveProjectWithLog();
@@ -2390,7 +2886,15 @@ function focusAssetToolbarAfterDelete(): void {
   });
 }
 
+function isLocalAsset(assetId: string): boolean {
+  const asset = project.value.assets.find((item) => item.id === assetId) ?? assetsStore.assets.find((item) => item.id === assetId);
+  return asset?.objectKey.startsWith("local://") === true;
+}
+
 function isAssetReferenced(assetId: string): boolean {
+  if (project.value.styles.some((style) => style.style.font === assetId)) {
+    return true;
+  }
   return project.value.screens.some((screen) => widgetTreeUsesAsset(screen.root, assetId));
 }
 
@@ -2616,40 +3120,72 @@ async function mountSimulator(): Promise<void> {
   if (simulatorRuntime.value) {
     return;
   }
-  if (!simulatorCanvas.value) {
+  const canvas = simulatorCanvas.value;
+  const mountGeneration = simulatorMountGeneration;
+  if (!canvas || !simulatorVisible.value) {
     return;
   }
+  if (simulatorMountInFlightGeneration === mountGeneration) {
+    return;
+  }
+  simulatorMountInFlightGeneration = mountGeneration;
   try {
     simulatorStore.markLoading(copy.value.runtime.loadingRuntime);
-    simulatorRuntime.value = await loadRuntime({
+    const runtime = await loadRuntime({
       wasmModuleUrl: simulatorWasmModuleUrl,
       assetResolver: (asset) => assetsStore.previewUrls[asset.id] ?? null
     });
+    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
+      runtime.destroy();
+      return;
+    }
+    simulatorRuntime.value = runtime;
     simulatorStore.setRuntimeKind(simulatorRuntime.value.getRuntimeKind?.() ?? "unknown");
-    await simulatorRuntime.value.mount(simulatorCanvas.value);
+    await simulatorRuntime.value.mount(canvas);
+    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
+      simulatorRuntime.value?.destroy();
+      simulatorRuntime.value = null;
+      return;
+    }
     simulatorStore.markReady(copy.value.runtime.simulatorLoaded);
     upsertLog("simulator-loaded", "10:21:13", copy.value.runtime.simulatorLoaded);
     await renderSimulator();
   } catch (error) {
+    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
+      return;
+    }
     const message = simulatorErrorMessage(error, copy.value.runtime.runtimeLoadFailed);
     simulatorStore.markFailed(message);
     upsertLog("simulator-load-failed", "10:21:13", message);
+  } finally {
+    if (simulatorMountInFlightGeneration === mountGeneration) {
+      simulatorMountInFlightGeneration = null;
+    }
   }
 }
 
 async function renderSimulator(): Promise<boolean> {
-  if (!simulatorRuntime.value) {
+  const runtime = simulatorRuntime.value;
+  const canvas = simulatorCanvas.value;
+  const renderGeneration = simulatorMountGeneration;
+  if (!runtime || !canvas || !simulatorVisible.value) {
     return false;
   }
   try {
     const screenName = activeScreen.value?.name ?? "Screen_1";
     simulatorStore.markRendering(screenName, copy.value.runtime.renderScreen(screenName));
-    await simulatorRuntime.value.renderProject(projectDocForRuntime(project.value, activeScreen.value?.id ?? null));
+    await runtime.renderProject(projectDocForRuntime(project.value, activeScreen.value?.id ?? null));
+    if (renderGeneration !== simulatorMountGeneration || simulatorRuntime.value !== runtime || simulatorCanvas.value !== canvas || !simulatorVisible.value) {
+      return false;
+    }
     simulatorStore.markReady(copy.value.runtime.previewUpdated);
     appendSimulatorRenderLog(screenName);
     upsertLog("preview-updated", "10:21:13", copy.value.runtime.previewUpdated);
     return true;
   } catch (error) {
+    if (renderGeneration !== simulatorMountGeneration || simulatorRuntime.value !== runtime || simulatorCanvas.value !== canvas || !simulatorVisible.value) {
+      return false;
+    }
     const message = simulatorErrorMessage(error, copy.value.runtime.previewFailed);
     simulatorStore.markFailed(message);
     appendLog(message, "10:21:13");

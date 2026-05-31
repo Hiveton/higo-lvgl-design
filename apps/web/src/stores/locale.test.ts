@@ -29,4 +29,59 @@ describe("useLocaleStore", () => {
 
     expect(useLocaleStore().locale).toBe("en-US");
   });
+
+  it("keeps locale usable when browser storage access is unavailable", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("storage unavailable");
+      }
+    });
+    setActivePinia(createPinia());
+
+    try {
+      const store = useLocaleStore();
+
+      expect(store.locale).toBe("en-US");
+      expect(() => store.setLocale("zh-CN")).not.toThrow();
+      expect(store.locale).toBe("zh-CN");
+      expect(document.documentElement.lang).toBe("zh-CN");
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      }
+    }
+  });
+
+  it("keeps locale usable when browser storage methods fail", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem() {
+          throw new Error("read blocked");
+        },
+        setItem() {
+          throw new Error("write blocked");
+        },
+        removeItem() {
+          throw new Error("remove blocked");
+        }
+      }
+    });
+    setActivePinia(createPinia());
+
+    try {
+      const store = useLocaleStore();
+
+      expect(store.locale).toBe("en-US");
+      expect(() => store.setLocale("zh-CN")).not.toThrow();
+      expect(store.locale).toBe("zh-CN");
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      }
+    }
+  });
 });

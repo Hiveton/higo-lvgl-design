@@ -14,3 +14,4 @@ apps/web/src/runtime/
 apps/web/tsconfig.tsbuildinfo
 packages/*/dist/
 packages/lvgl-wasm-runtime/.cache/
+.cache/

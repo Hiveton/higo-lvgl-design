@@ -23,6 +23,7 @@ export type EditorCommandMessage =
   | { key: "renameScreen" }
   | { key: "reorderWidget" }
   | { key: "resizeWidget" }
+  | { key: "updateProjectStyles" }
   | { key: "updateTarget" }
   | { key: "updateTheme" }
   | { key: "updateWidgetLayout" }
@@ -194,10 +195,10 @@ export function updateWidgetStyle(input: { widgetId: string; style: WidgetStyle 
       previous ??= current ? { ...current.style } : null;
       return updateWidget(doc, input.widgetId, (widget) => ({
         ...widget,
-        style: {
+        style: normalizeWidgetStyle({
           ...widget.style,
           ...input.style
-        }
+        }, widget.style, doc.assets)
       }));
     },
     revert(doc) {
@@ -224,11 +225,11 @@ export function resizeWidget(input: { widgetId: string; width: number; height: n
       previous ??= current ? { width: current.layout.width, height: current.layout.height } : null;
       return updateWidget(doc, input.widgetId, (widget) => ({
         ...widget,
-        layout: {
+        layout: normalizeLayoutBox({
           ...widget.layout,
           width: input.width,
           height: input.height
-        }
+        }, widget.layout)
       }));
     },
     revert(doc) {
@@ -261,7 +262,7 @@ export function setWidgetLayoutSnapshot(input: {
     apply(doc) {
       return updateWidget(doc, input.widgetId, (widget) => ({
         ...widget,
-        layout: cloneLayout(input.after)
+        layout: normalizeLayoutBox(input.after, widget.layout)
       }));
     },
     revert(doc) {
@@ -285,10 +286,10 @@ export function updateWidgetLayout(input: { widgetId: string; layout: Partial<La
       previous ??= current ? { ...current.layout } : null;
       return updateWidget(doc, input.widgetId, (widget) => ({
         ...widget,
-        layout: {
+        layout: normalizeLayoutBox({
           ...widget.layout,
           ...input.layout
-        }
+        }, widget.layout)
       }));
     },
     revert(doc) {
@@ -420,10 +421,10 @@ export function updateWidgetProps(input: {
       previous ??= current ? { ...current.props } : null;
       return updateWidget(doc, input.widgetId, (widget) => ({
         ...widget,
-        props: {
+        props: normalizeWidgetProps(widget.type, {
           ...widget.props,
           ...input.props
-        }
+        }, widget.props)
       }));
     },
     revert(doc) {
@@ -606,6 +607,256 @@ function cloneLayout(layout: LayoutBox): LayoutBox {
     align: layout.align,
     flex: layout.flex ? { ...layout.flex } : undefined
   };
+}
+
+function normalizeLayoutBox(layout: LayoutBox, fallback: LayoutBox): LayoutBox {
+  return {
+    x: normalizeInteger(layout.x, fallback.x),
+    y: normalizeInteger(layout.y, fallback.y),
+    width: normalizePositiveInteger(layout.width, fallback.width),
+    height: normalizePositiveInteger(layout.height, fallback.height),
+    align: normalizeLayoutAlign(layout.align, fallback.align),
+    flex: layout.flex
+      ? {
+          direction: normalizeFlexDirection(layout.flex.direction, fallback.flex?.direction ?? "row"),
+          gap: normalizeNonNegativeInteger(layout.flex.gap, fallback.flex?.gap ?? 0),
+          wrap: normalizeFlexWrap(layout.flex.wrap, fallback.flex?.wrap ?? false)
+        }
+      : undefined
+  };
+}
+
+function normalizeInteger(value: number, fallback: number): number {
+  return Number.isFinite(value) ? Math.round(value) : fallback;
+}
+
+function normalizePositiveInteger(value: number, fallback: number): number {
+  return Math.max(1, normalizeInteger(value, fallback));
+}
+
+function normalizeNonNegativeInteger(value: number, fallback: number): number {
+  return Math.max(0, normalizeInteger(value, fallback));
+}
+
+function normalizeWidgetStyle(style: WidgetStyle, fallback: WidgetStyle, assets: ProjectDoc["assets"] = []): WidgetStyle {
+  return {
+    bgColor: normalizeStyleColor(style.bgColor, fallback.bgColor),
+    textColor: normalizeStyleColor(style.textColor, fallback.textColor),
+    borderColor: normalizeStyleColor(style.borderColor, fallback.borderColor),
+    font: normalizeStyleFont(style.font, fallback.font, assets),
+    align: normalizeStyleTextAlign(style.align, fallback.align),
+    blendMode: normalizeBlendMode(style.blendMode, fallback.blendMode),
+    opacity: style.opacity === undefined ? undefined : normalizeBoundedInteger(style.opacity, fallback.opacity ?? 100, 0, 100),
+    radius: style.radius === undefined ? undefined : normalizeNonNegativeInteger(style.radius, fallback.radius ?? 0),
+    lineSpace: style.lineSpace === undefined ? undefined : normalizeNonNegativeInteger(style.lineSpace, fallback.lineSpace ?? 0),
+    letterSpace: style.letterSpace === undefined ? undefined : normalizeNonNegativeInteger(style.letterSpace, fallback.letterSpace ?? 0),
+    padding: style.padding ? normalizePaddingBox(style.padding, fallback.padding) : undefined
+  };
+}
+
+function normalizePaddingBox(
+  padding: NonNullable<WidgetStyle["padding"]>,
+  fallback: WidgetStyle["padding"]
+): NonNullable<WidgetStyle["padding"]> {
+  return {
+    top: normalizeNonNegativeInteger(padding.top, fallback?.top ?? 0),
+    right: normalizeNonNegativeInteger(padding.right, fallback?.right ?? 0),
+    bottom: normalizeNonNegativeInteger(padding.bottom, fallback?.bottom ?? 0),
+    left: normalizeNonNegativeInteger(padding.left, fallback?.left ?? 0)
+  };
+}
+
+function normalizeBoundedInteger(value: number, fallback: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, normalizeInteger(value, fallback)));
+}
+
+function normalizeLayoutAlign(value: LayoutBox["align"], fallback: LayoutBox["align"]): LayoutBox["align"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "top-left" || value === "top-right" || value === "center" || value === "bottom-left" || value === "bottom-right"
+    ? value
+    : fallback;
+}
+
+function normalizeFlexDirection(
+  value: NonNullable<LayoutBox["flex"]>["direction"],
+  fallback: NonNullable<LayoutBox["flex"]>["direction"]
+): NonNullable<LayoutBox["flex"]>["direction"] {
+  return value === "row" || value === "column" ? value : fallback;
+}
+
+function normalizeFlexWrap(value: NonNullable<LayoutBox["flex"]>["wrap"], fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeStyleColor(value: WidgetStyle["bgColor"], fallback: WidgetStyle["bgColor"]): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === "string" && isValidStyleColor(value) ? value : fallback;
+}
+
+function normalizeStyleFont(value: WidgetStyle["font"], fallback: WidgetStyle["font"], assets: ProjectDoc["assets"]): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === "string" && (value === "" || /^lv_font_montserrat_\d+$/.test(value) || assets.some((asset) => asset.id === value && asset.kind === "font"))
+    ? value
+    : fallback;
+}
+
+function normalizeStyleTextAlign(value: WidgetStyle["align"], fallback: WidgetStyle["align"]): WidgetStyle["align"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "left" || value === "center" || value === "right" ? value : fallback;
+}
+
+function normalizeBlendMode(value: WidgetStyle["blendMode"], fallback: WidgetStyle["blendMode"]): WidgetStyle["blendMode"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === "normal" || value === "additive" || value === "subtractive" || value === "multiply" || value === "replace"
+    ? value
+    : fallback;
+}
+
+function isValidStyleColor(value: string): boolean {
+  return value.trim() === "" || /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim());
+}
+
+function normalizeWidgetProps(
+  widgetType: WidgetNode["type"],
+  props: Record<string, WidgetPropValue>,
+  fallback: Record<string, WidgetPropValue>
+): Record<string, WidgetPropValue> {
+  const next = { ...props };
+
+  if (widgetType === "label" || widgetType === "button" || widgetType === "checkbox" || widgetType === "dropdown") {
+    normalizeStringProp(next, fallback, "text");
+  }
+  if (widgetType === "image") {
+    normalizeStringProp(next, fallback, "assetId");
+  }
+  if (widgetType === "dropdown") {
+    normalizeStringProp(next, fallback, "options");
+    normalizeNonNegativeIntegerProp(next, fallback, "selected", 0);
+    const options = dropdownOptionList(next.options);
+    if (options.length > 0) {
+      next.selected = Math.min(numberProp(next, "selected", 0), options.length - 1);
+    }
+  }
+  if (widgetType === "checkbox" || widgetType === "switch") {
+    normalizeBooleanProp(next, fallback, "checked");
+  }
+  if (widgetType === "spinner") {
+    normalizePositiveIntegerProp(next, fallback, "spinTime", 1000);
+    normalizePositiveIntegerProp(next, fallback, "arcLength", 60);
+  }
+  if (widgetType === "chart") {
+    normalizeIntegerProp(next, fallback, "min", 0);
+    normalizeIntegerProp(next, fallback, "max", 100);
+    normalizeRangeBounds(next);
+    normalizePositiveIntegerProp(next, fallback, "pointCount", 8);
+    if (Array.isArray(next.values)) {
+      next.values = next.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)).map((value) => Math.round(value));
+    }
+  }
+  if (widgetType === "slider" || widgetType === "bar" || widgetType === "arc") {
+    normalizeIntegerProp(next, fallback, "min", 0);
+    normalizeIntegerProp(next, fallback, "max", 100);
+    normalizeRangeBounds(next);
+    normalizeNonNegativeIntegerProp(next, fallback, "value", 0);
+    const min = numberProp(next, "min", 0);
+    const max = numberProp(next, "max", 100);
+    next.value = Math.min(max, Math.max(min, numberProp(next, "value", min)));
+  }
+
+  return next;
+}
+
+function normalizeStringProp(props: Record<string, WidgetPropValue>, fallback: Record<string, WidgetPropValue>, key: string): void {
+  if (props[key] === undefined) {
+    return;
+  }
+  if (typeof props[key] !== "string") {
+    props[key] = typeof fallback[key] === "string" ? fallback[key] : "";
+  }
+}
+
+function normalizeBooleanProp(props: Record<string, WidgetPropValue>, fallback: Record<string, WidgetPropValue>, key: string): void {
+  if (props[key] === undefined) {
+    return;
+  }
+  if (typeof props[key] !== "boolean") {
+    props[key] = typeof fallback[key] === "boolean" ? fallback[key] : false;
+  }
+}
+
+function normalizeIntegerProp(
+  props: Record<string, WidgetPropValue>,
+  fallback: Record<string, WidgetPropValue>,
+  key: string,
+  defaultValue: number
+): void {
+  if (props[key] === undefined) {
+    return;
+  }
+  props[key] = normalizePropIntegerValue(props[key], fallback[key], defaultValue);
+}
+
+function normalizePositiveIntegerProp(
+  props: Record<string, WidgetPropValue>,
+  fallback: Record<string, WidgetPropValue>,
+  key: string,
+  defaultValue: number
+): void {
+  if (props[key] === undefined) {
+    return;
+  }
+  props[key] = Math.max(1, normalizePropIntegerValue(props[key], fallback[key], defaultValue));
+}
+
+function normalizeNonNegativeIntegerProp(
+  props: Record<string, WidgetPropValue>,
+  fallback: Record<string, WidgetPropValue>,
+  key: string,
+  defaultValue: number
+): void {
+  if (props[key] === undefined) {
+    return;
+  }
+  props[key] = Math.max(0, normalizePropIntegerValue(props[key], fallback[key], defaultValue));
+}
+
+function normalizePropIntegerValue(value: WidgetPropValue, fallback: WidgetPropValue, defaultValue: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof fallback === "number" && Number.isFinite(fallback)) {
+    return Math.round(fallback);
+  }
+  return defaultValue;
+}
+
+function normalizeRangeBounds(props: Record<string, WidgetPropValue>): void {
+  const min = numberProp(props, "min", 0);
+  const max = numberProp(props, "max", 100);
+  if (max <= min) {
+    props.max = min + 1;
+  }
+}
+
+function numberProp(props: Record<string, WidgetPropValue>, key: string, fallback: number): number {
+  const value = props[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function dropdownOptionList(value: WidgetPropValue | undefined): string[] {
+  return typeof value === "string"
+    ? value.split(/\r?\n/).map((option) => option.trim()).filter(Boolean)
+    : [];
 }
 
 function findWidget(doc: ProjectDoc, widgetId: string): WidgetNode | null {

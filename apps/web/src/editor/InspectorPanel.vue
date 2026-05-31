@@ -74,7 +74,7 @@
       </label>
       <label>
         {{ copy.inspector.fields.font }}
-        <select data-testid="style-font-select" :aria-label="copy.inspector.a11y.textFont" :title="copy.inspector.a11y.textFont" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.font ?? ''" @change="emitInput('update-style-font', $event)">
+        <select data-testid="style-font-select" :aria-label="copy.inspector.a11y.textFont" :title="copy.inspector.a11y.textFont" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.font ?? ''" :aria-invalid="selectedFontWarning ? 'true' : undefined" :aria-describedby="selectedFontWarning ? 'font-asset-warning' : undefined" @change="emitInput('update-style-font', $event)">
           <option value="">{{ copy.inspector.fields.default }}</option>
           <option value="lv_font_montserrat_14">lv_font_montserrat_14</option>
           <option value="lv_font_montserrat_20">lv_font_montserrat_20</option>
@@ -84,6 +84,7 @@
         </select>
       </label>
       <p v-if="selectedFontIsUploadedAsset" class="field-note" data-testid="font-asset-export-note" role="note">{{ copy.inspector.fontAssetExportNote }}</p>
+      <p v-if="selectedFontWarning" id="font-asset-warning" class="field-error" data-testid="font-asset-warning" role="alert">{{ selectedFontWarning }}</p>
       <label>
         {{ copy.inspector.fields.align }}
         <select data-testid="style-align-select" :aria-label="copy.inspector.a11y.textAlignment" :title="copy.inspector.a11y.textAlignment" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.align ?? 'left'" @change="emitInput('update-style-align', $event)">
@@ -95,15 +96,19 @@
     </section>
     <section v-if="activeInspectorTab === 'style' && hasRangeProps" class="inspector-section">
       <h2>{{ copy.inspector.sections.props }}</h2>
-      <label>{{ copy.inspector.fields.min }}<input data-testid="prop-min-input" type="number" :aria-label="copy.inspector.a11y.minimumValue" :title="copy.inspector.a11y.minimumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('min', 0)" @input="emitFieldInput('update-prop-number', 'min', $event)" /></label>
-      <label>{{ copy.inspector.fields.max }}<input data-testid="prop-max-input" type="number" :aria-label="copy.inspector.a11y.maximumValue" :title="copy.inspector.a11y.maximumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('max', 100)" @input="emitFieldInput('update-prop-number', 'max', $event)" /></label>
+      <label>{{ copy.inspector.fields.min }}<input data-testid="prop-min-input" type="number" :aria-label="copy.inspector.a11y.minimumValue" :title="copy.inspector.a11y.minimumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('min', 0)" :aria-invalid="inspectorErrors['prop-min'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-min'] ? 'prop-min-error' : undefined" @input="emitFieldInput('update-prop-number', 'min', $event)" /></label>
+      <p v-if="inspectorErrors['prop-min']" id="prop-min-error" class="field-error" data-testid="prop-min-error" role="alert">{{ inspectorErrors['prop-min'] }}</p>
+      <label>{{ copy.inspector.fields.max }}<input data-testid="prop-max-input" type="number" :aria-label="copy.inspector.a11y.maximumValue" :title="copy.inspector.a11y.maximumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('max', 100)" :aria-invalid="inspectorErrors['prop-max'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-max'] ? 'prop-max-error' : undefined" @input="emitFieldInput('update-prop-number', 'max', $event)" /></label>
+      <p v-if="inspectorErrors['prop-max']" id="prop-max-error" class="field-error" data-testid="prop-max-error" role="alert">{{ inspectorErrors['prop-max'] }}</p>
       <label>{{ copy.inspector.fields.value }}<input data-testid="prop-value-input" type="number" :aria-label="copy.inspector.a11y.value" :title="copy.inspector.a11y.value" step="1" :disabled="selectedWidget?.locked" :value="propNumber('value', 0)" :aria-invalid="inspectorErrors['prop-value'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-value'] ? 'prop-value-error' : undefined" @input="emitFieldInput('update-prop-number', 'value', $event)" /></label>
       <p v-if="inspectorErrors['prop-value']" id="prop-value-error" class="field-error" data-testid="prop-value-error" role="alert">{{ inspectorErrors['prop-value'] }}</p>
     </section>
     <section v-if="activeInspectorTab === 'style' && selectedWidget?.type === 'chart'" class="inspector-section">
       <h2>{{ copy.inspector.sections.props }}</h2>
-      <label>{{ copy.inspector.fields.min }}<input data-testid="prop-min-input" type="number" :aria-label="copy.inspector.a11y.minimumValue" :title="copy.inspector.a11y.minimumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('min', 0)" @input="emitFieldInput('update-prop-number', 'min', $event)" /></label>
-      <label>{{ copy.inspector.fields.max }}<input data-testid="prop-max-input" type="number" :aria-label="copy.inspector.a11y.maximumValue" :title="copy.inspector.a11y.maximumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('max', 100)" @input="emitFieldInput('update-prop-number', 'max', $event)" /></label>
+      <label>{{ copy.inspector.fields.min }}<input data-testid="prop-min-input" type="number" :aria-label="copy.inspector.a11y.minimumValue" :title="copy.inspector.a11y.minimumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('min', 0)" :aria-invalid="inspectorErrors['prop-min'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-min'] ? 'prop-min-error' : undefined" @input="emitFieldInput('update-prop-number', 'min', $event)" /></label>
+      <p v-if="inspectorErrors['prop-min']" id="prop-min-error" class="field-error" data-testid="prop-min-error" role="alert">{{ inspectorErrors['prop-min'] }}</p>
+      <label>{{ copy.inspector.fields.max }}<input data-testid="prop-max-input" type="number" :aria-label="copy.inspector.a11y.maximumValue" :title="copy.inspector.a11y.maximumValue" step="1" :disabled="selectedWidget?.locked" :value="propNumber('max', 100)" :aria-invalid="inspectorErrors['prop-max'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-max'] ? 'prop-max-error' : undefined" @input="emitFieldInput('update-prop-number', 'max', $event)" /></label>
+      <p v-if="inspectorErrors['prop-max']" id="prop-max-error" class="field-error" data-testid="prop-max-error" role="alert">{{ inspectorErrors['prop-max'] }}</p>
       <label>{{ copy.inspector.fields.pointCount }}<input data-testid="prop-point-count-input" type="number" :aria-label="copy.inspector.a11y.chartPointCount" :title="copy.inspector.a11y.chartPointCount" min="1" step="1" :disabled="selectedWidget?.locked" :value="propNumber('pointCount', 8)" :aria-invalid="inspectorErrors['prop-point-count'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-point-count'] ? 'prop-point-count-error' : undefined" @input="emitFieldInput('update-prop-number', 'pointCount', $event)" /></label>
       <p v-if="inspectorErrors['prop-point-count']" id="prop-point-count-error" class="field-error" data-testid="prop-point-count-error" role="alert">{{ inspectorErrors['prop-point-count'] }}</p>
       <label>{{ copy.inspector.fields.values }}<textarea data-testid="prop-values-input" :aria-label="copy.inspector.a11y.chartValues" :title="copy.inspector.a11y.chartValues" :disabled="selectedWidget?.locked" :value="propValues()" :aria-invalid="inspectorErrors['prop-values'] ? 'true' : undefined" :aria-describedby="inspectorErrors['prop-values'] ? 'prop-values-error' : undefined" @input="emit('update-prop-values', inputValue($event))" /></label>
@@ -173,9 +178,10 @@
             :title="colorPreviewLabel(copy.inspector.a11y.textColor, selectedWidget?.style.textColor, '#FFFFFF')"
             :style="{ backgroundColor: selectedWidget?.style.textColor ?? '#FFFFFF' }"
           />
-          <input data-testid="style-text-color-input" :aria-label="copy.inspector.a11y.textColor" :title="copy.inspector.a11y.textColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.textColor ?? '#FFFFFF'" @input="emitStyleText('textColor', $event)" />
+          <input data-testid="style-text-color-input" :aria-label="copy.inspector.a11y.textColor" :title="copy.inspector.a11y.textColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.textColor ?? '#FFFFFF'" :aria-invalid="inspectorErrors['style-text-color'] ? 'true' : undefined" :aria-describedby="inspectorErrors['style-text-color'] ? 'style-text-color-error' : undefined" @input="emitStyleText('textColor', $event)" />
         </span>
       </label>
+      <p v-if="inspectorErrors['style-text-color']" id="style-text-color-error" class="field-error" data-testid="style-text-color-error" role="alert">{{ inspectorErrors['style-text-color'] }}</p>
       <label class="color-field">
         {{ copy.inspector.fields.background }}
         <span class="color-control">
@@ -187,9 +193,10 @@
             :title="colorPreviewLabel(copy.inspector.a11y.backgroundColor, selectedWidget?.style.bgColor, 'transparent')"
             :style="{ backgroundColor: selectedWidget?.style.bgColor || 'transparent' }"
           />
-          <input data-testid="style-bg-color-input" :aria-label="copy.inspector.a11y.backgroundColor" :title="copy.inspector.a11y.backgroundColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.bgColor ?? ''" @input="emitStyleText('bgColor', $event)" />
+          <input data-testid="style-bg-color-input" :aria-label="copy.inspector.a11y.backgroundColor" :title="copy.inspector.a11y.backgroundColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.bgColor ?? ''" :aria-invalid="inspectorErrors['style-bg-color'] ? 'true' : undefined" :aria-describedby="inspectorErrors['style-bg-color'] ? 'style-bg-color-error' : undefined" @input="emitStyleText('bgColor', $event)" />
         </span>
       </label>
+      <p v-if="inspectorErrors['style-bg-color']" id="style-bg-color-error" class="field-error" data-testid="style-bg-color-error" role="alert">{{ inspectorErrors['style-bg-color'] }}</p>
       <label class="color-field">
         {{ copy.inspector.fields.border }}
         <span class="color-control">
@@ -201,11 +208,22 @@
             :title="colorPreviewLabel(copy.inspector.a11y.borderColor, selectedWidget?.style.borderColor, 'transparent')"
             :style="{ backgroundColor: selectedWidget?.style.borderColor || 'transparent' }"
           />
-          <input data-testid="style-border-color-input" :aria-label="copy.inspector.a11y.borderColor" :title="copy.inspector.a11y.borderColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.borderColor ?? ''" @input="emitStyleText('borderColor', $event)" />
+          <input data-testid="style-border-color-input" :aria-label="copy.inspector.a11y.borderColor" :title="copy.inspector.a11y.borderColor" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.borderColor ?? ''" :aria-invalid="inspectorErrors['style-border-color'] ? 'true' : undefined" :aria-describedby="inspectorErrors['style-border-color'] ? 'style-border-color-error' : undefined" @input="emitStyleText('borderColor', $event)" />
         </span>
       </label>
+      <p v-if="inspectorErrors['style-border-color']" id="style-border-color-error" class="field-error" data-testid="style-border-color-error" role="alert">{{ inspectorErrors['style-border-color'] }}</p>
       <label>{{ copy.inspector.fields.opacity }}<input data-testid="style-opacity-input" type="number" :aria-label="copy.inspector.fields.opacity" :title="copy.inspector.fields.opacity" min="0" max="100" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.opacity ?? 100" :aria-invalid="inspectorErrors.opacity ? 'true' : undefined" :aria-describedby="inspectorErrors.opacity ? 'style-opacity-error' : undefined" @input="emitStyleNumber('opacity', $event)" /></label>
       <p v-if="inspectorErrors.opacity" id="style-opacity-error" class="field-error" data-testid="style-opacity-error" role="alert">{{ inspectorErrors.opacity }}</p>
+      <label>
+        {{ copy.inspector.fields.blendMode }}
+        <select data-testid="style-blend-mode-select" :aria-label="copy.inspector.a11y.blendMode" :title="copy.inspector.a11y.blendMode" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.blendMode ?? 'normal'" @change="emitInput('update-style-blend-mode', $event)">
+          <option value="normal">{{ copy.inspector.options.blendMode.normal }}</option>
+          <option value="additive">{{ copy.inspector.options.blendMode.additive }}</option>
+          <option value="subtractive">{{ copy.inspector.options.blendMode.subtractive }}</option>
+          <option value="multiply">{{ copy.inspector.options.blendMode.multiply }}</option>
+          <option value="replace">{{ copy.inspector.options.blendMode.replace }}</option>
+        </select>
+      </label>
       <label>{{ copy.inspector.fields.radius }}<input data-testid="style-radius-input" type="number" :aria-label="copy.inspector.fields.radius" :title="copy.inspector.fields.radius" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.radius ?? 0" :aria-invalid="inspectorErrors.radius ? 'true' : undefined" :aria-describedby="inspectorErrors.radius ? 'style-radius-error' : undefined" @input="emitStyleNumber('radius', $event)" /></label>
       <p v-if="inspectorErrors.radius" id="style-radius-error" class="field-error" data-testid="style-radius-error" role="alert">{{ inspectorErrors.radius }}</p>
       <label>{{ copy.inspector.fields.paddingTop }}<input data-testid="style-padding-top-input" type="number" :aria-label="copy.inspector.a11y.paddingTop" :title="copy.inspector.a11y.paddingTop" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.padding?.top ?? 0" :aria-invalid="inspectorErrors['padding-top'] ? 'true' : undefined" :aria-describedby="inspectorErrors['padding-top'] ? 'style-padding-top-error' : undefined" @input="emitPaddingSide('top', $event)" /></label>
@@ -216,8 +234,10 @@
       <p v-if="inspectorErrors['padding-bottom']" id="style-padding-bottom-error" class="field-error" data-testid="style-padding-bottom-error" role="alert">{{ inspectorErrors['padding-bottom'] }}</p>
       <label>{{ copy.inspector.fields.paddingLeft }}<input data-testid="style-padding-left-input" type="number" :aria-label="copy.inspector.a11y.paddingLeft" :title="copy.inspector.a11y.paddingLeft" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.padding?.left ?? 0" :aria-invalid="inspectorErrors['padding-left'] ? 'true' : undefined" :aria-describedby="inspectorErrors['padding-left'] ? 'style-padding-left-error' : undefined" @input="emitPaddingSide('left', $event)" /></label>
       <p v-if="inspectorErrors['padding-left']" id="style-padding-left-error" class="field-error" data-testid="style-padding-left-error" role="alert">{{ inspectorErrors['padding-left'] }}</p>
-      <label v-if="canEditText">{{ copy.inspector.fields.letterSpace }}<input data-testid="style-letter-space-input" type="number" :aria-label="copy.inspector.a11y.letterSpacing" :title="copy.inspector.a11y.letterSpacing" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.letterSpace ?? 0" @input="emitStyleNumber('letterSpace', $event)" /></label>
-      <label v-if="canEditText">{{ copy.inspector.fields.lineSpace }}<input data-testid="style-line-space-input" type="number" :aria-label="copy.inspector.a11y.lineSpacing" :title="copy.inspector.a11y.lineSpacing" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.lineSpace ?? 0" @input="emitStyleNumber('lineSpace', $event)" /></label>
+      <label v-if="canEditText">{{ copy.inspector.fields.letterSpace }}<input data-testid="style-letter-space-input" type="number" :aria-label="copy.inspector.a11y.letterSpacing" :title="copy.inspector.a11y.letterSpacing" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.letterSpace ?? 0" :aria-invalid="inspectorErrors.letterSpace ? 'true' : undefined" :aria-describedby="inspectorErrors.letterSpace ? 'style-letter-space-error' : undefined" @input="emitStyleNumber('letterSpace', $event)" /></label>
+      <p v-if="inspectorErrors.letterSpace" id="style-letter-space-error" class="field-error" data-testid="style-letter-space-error" role="alert">{{ inspectorErrors.letterSpace }}</p>
+      <label v-if="canEditText">{{ copy.inspector.fields.lineSpace }}<input data-testid="style-line-space-input" type="number" :aria-label="copy.inspector.a11y.lineSpacing" :title="copy.inspector.a11y.lineSpacing" min="0" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.style.lineSpace ?? 0" :aria-invalid="inspectorErrors.lineSpace ? 'true' : undefined" :aria-describedby="inspectorErrors.lineSpace ? 'style-line-space-error' : undefined" @input="emitStyleNumber('lineSpace', $event)" /></label>
+      <p v-if="inspectorErrors.lineSpace" id="style-line-space-error" class="field-error" data-testid="style-line-space-error" role="alert">{{ inspectorErrors.lineSpace }}</p>
     </section>
     <section v-if="activeInspectorTab === 'layout' && selectedWidget" class="inspector-section">
       <h2>{{ copy.inspector.sections.target }}</h2>
@@ -249,8 +269,10 @@
     </section>
     <section v-if="activeInspectorTab === 'layout' && selectedWidget" class="inspector-section">
       <h2>{{ copy.inspector.sections.layout }}</h2>
-      <label>X<input data-testid="layout-x-input" type="number" :aria-label="copy.inspector.a11y.layoutX" :title="copy.inspector.a11y.layoutX" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.x" @input="emitLayoutNumber('x', $event)" /></label>
-      <label>Y<input data-testid="layout-y-input" type="number" :aria-label="copy.inspector.a11y.layoutY" :title="copy.inspector.a11y.layoutY" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.y" @input="emitLayoutNumber('y', $event)" /></label>
+      <label>X<input data-testid="layout-x-input" type="number" :aria-label="copy.inspector.a11y.layoutX" :title="copy.inspector.a11y.layoutX" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.x" :aria-invalid="inspectorErrors.x ? 'true' : undefined" :aria-describedby="inspectorErrors.x ? 'layout-x-error' : undefined" @input="emitLayoutNumber('x', $event)" /></label>
+      <p v-if="inspectorErrors.x" id="layout-x-error" class="field-error" data-testid="layout-x-error" role="alert">{{ inspectorErrors.x }}</p>
+      <label>Y<input data-testid="layout-y-input" type="number" :aria-label="copy.inspector.a11y.layoutY" :title="copy.inspector.a11y.layoutY" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.y" :aria-invalid="inspectorErrors.y ? 'true' : undefined" :aria-describedby="inspectorErrors.y ? 'layout-y-error' : undefined" @input="emitLayoutNumber('y', $event)" /></label>
+      <p v-if="inspectorErrors.y" id="layout-y-error" class="field-error" data-testid="layout-y-error" role="alert">{{ inspectorErrors.y }}</p>
       <label>{{ copy.inspector.fields.width }}<input data-testid="layout-width-input" type="number" :aria-label="copy.inspector.a11y.layoutWidth" :title="copy.inspector.a11y.layoutWidth" min="1" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.width" :aria-invalid="inspectorErrors.width ? 'true' : undefined" :aria-describedby="inspectorErrors.width ? 'layout-width-error' : undefined" @input="emitLayoutNumber('width', $event)" /></label>
       <p v-if="inspectorErrors.width" id="layout-width-error" class="field-error" data-testid="layout-width-error" role="alert">{{ inspectorErrors.width }}</p>
       <label>{{ copy.inspector.fields.height }}<input data-testid="layout-height-input" type="number" :aria-label="copy.inspector.a11y.layoutHeight" :title="copy.inspector.a11y.layoutHeight" min="1" step="1" :disabled="selectedWidget?.locked" :value="selectedWidget?.layout.height" :aria-invalid="inspectorErrors.height ? 'true' : undefined" :aria-describedby="inspectorErrors.height ? 'layout-height-error' : undefined" @input="emitLayoutNumber('height', $event)" /></label>
@@ -376,6 +398,7 @@ const emit = defineEmits<{
   "update-prop-text": [field: string, value: string];
   "update-prop-values": [value: string];
   "update-style-align": [align: string];
+  "update-style-blend-mode": [blendMode: string];
   "update-style-font": [font: string];
   "update-style-number": [field: "opacity" | "radius" | "letterSpace" | "lineSpace", value: string];
   "update-style-text": [field: "textColor" | "bgColor" | "borderColor", value: string];
@@ -440,7 +463,14 @@ const imageBindingState = computed(() => {
 });
 const selectedFontIsUploadedAsset = computed(() => {
   const font = props.selectedWidget?.style.font;
-  return typeof font === "string" && Boolean(font) && !font.startsWith("lv_font_");
+  return typeof font === "string" && Boolean(font) && props.fontAssets.some((asset) => asset.id === font);
+});
+const selectedFontWarning = computed(() => {
+  const font = props.selectedWidget?.style.font;
+  if (typeof font !== "string" || !font || isBuiltInLvglFont(font) || props.fontAssets.some((asset) => asset.id === font)) {
+    return "";
+  }
+  return copy.value.inspector.fontAssetWarning(font);
 });
 const eventTargetWidget = computed(() =>
   props.eventTargetRows.find((row) => row.widget.id === props.eventTargetWidgetId)?.widget ?? null
@@ -509,6 +539,7 @@ type StringInputEvent =
   | "update-flex-gap"
   | "update-layout-align"
   | "update-style-align"
+  | "update-style-blend-mode"
   | "update-style-font"
   | "update-target-color-depth"
   | "update-target-device-name"
@@ -541,6 +572,9 @@ function emitInput(eventName: StringInputEvent, event: Event): void {
       break;
     case "update-style-align":
       emit("update-style-align", value);
+      break;
+    case "update-style-blend-mode":
+      emit("update-style-blend-mode", value);
       break;
     case "update-style-font":
       emit("update-style-font", value);
@@ -586,6 +620,10 @@ function emitLayoutNumber(field: "x" | "y" | "width" | "height", event: Event): 
 
 function emitTargetNumber(field: "width" | "height" | "dpi", event: Event): void {
   emit("update-target-number", field, inputValue(event));
+}
+
+function isBuiltInLvglFont(font: string): boolean {
+  return /^lv_font_montserrat_\d+$/.test(font);
 }
 
 function updateEventType(event: Event): void {

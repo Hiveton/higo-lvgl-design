@@ -1,4 +1,5 @@
-import { apiError } from "./errors";
+import { apiErrorFromPayload, parseJsonPayload, type ErrorPayload } from "./errors";
+import { isRecord, isNonEmptyString } from "./utils";
 
 export type AuthUser = {
   id: string;
@@ -22,30 +23,51 @@ export async function login(email: string, password: string): Promise<LoginRespo
     },
     body: JSON.stringify({ email, password })
   });
-  if (!response.ok) {
-    throw await apiError(response, "LOGIN_FAILED", `login failed with status ${response.status}`);
+  const payload = await parseJsonPayload<Partial<LoginResponse> & ErrorPayload>(response);
+  const token = normalizeToken(payload?.token);
+  if (!response.ok || token === "" || !isAuthUser(payload?.user)) {
+    throw apiErrorFromPayload(response, payload, "LOGIN_FAILED", `login failed with status ${response.status}`);
   }
-  const payload = (await response.json()) as LoginResponse;
-  setAuthToken(payload.token);
-  return payload;
+  setAuthToken(token);
+  return { token, user: payload.user };
 }
 
 export async function getCurrentUser(): Promise<AuthUser> {
   const response = await fetch("/api/auth/me", {
     headers: authHeaders()
   });
-  if (!response.ok) {
+  const payload = await parseJsonPayload<Partial<AuthUser> & ErrorPayload>(response);
+  if (!response.ok || !isAuthUser(payload)) {
     clearAuthToken();
-    throw await apiError(response, "CURRENT_USER_LOOKUP_FAILED", `current user lookup failed with status ${response.status}`);
+    throw apiErrorFromPayload(response, payload, "CURRENT_USER_LOOKUP_FAILED", `current user lookup failed with status ${response.status}`);
   }
-  return response.json() as Promise<AuthUser>;
+  return payload;
+}
+
+function isAuthUser(value: unknown): value is AuthUser {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return isNonEmptyString(value.id)
+    && isEmailString(value.email)
+    && isNonEmptyString(value.displayName);
+}
+
+function isEmailString(value: unknown): value is string {
+  return typeof value === "string"
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export function setAuthToken(token: string): void {
-  memoryToken = token;
+  const normalizedToken = normalizeToken(token);
+  memoryToken = normalizedToken;
   const storage = getBrowserStorage();
   if (typeof storage?.setItem === "function") {
-    storage.setItem(tokenKey, token);
+    try {
+      storage.setItem(tokenKey, normalizedToken);
+    } catch {
+      // Keep the in-memory token active when browser storage is unavailable.
+    }
   }
 }
 
@@ -53,16 +75,24 @@ export function clearAuthToken(): void {
   memoryToken = null;
   const storage = getBrowserStorage();
   if (typeof storage?.removeItem === "function") {
-    storage.removeItem(tokenKey);
+    try {
+      storage.removeItem(tokenKey);
+    } catch {
+      // Clearing memoryToken is enough when browser storage cannot be updated.
+    }
   }
 }
 
 export function getAuthToken(): string | null {
   const storage = getBrowserStorage();
   if (typeof storage?.getItem === "function") {
-    return storage.getItem(tokenKey) ?? memoryToken;
+    try {
+      return normalizeStoredToken(storage.getItem(tokenKey)) ?? normalizeStoredToken(memoryToken);
+    } catch {
+      return normalizeStoredToken(memoryToken);
+    }
   }
-  return memoryToken;
+  return normalizeStoredToken(memoryToken);
 }
 
 export function getBrowserStorage(): Storage | null {
@@ -86,6 +116,15 @@ function isStorageLike(value: unknown): value is Storage {
     && typeof (value as Storage).getItem === "function"
     && typeof (value as Storage).setItem === "function"
     && typeof (value as Storage).removeItem === "function";
+}
+
+function normalizeToken(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeStoredToken(value: string | null): string | null {
+  const token = normalizeToken(value);
+  return token === "" ? null : token;
 }
 
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {

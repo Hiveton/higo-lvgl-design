@@ -1,11 +1,31 @@
 import { setActivePinia, createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDefaultProjectDoc, validateProjectDoc } from "@hiveton-lvgl/schema";
 import { clearAuthToken } from "../api/auth";
 import { useProjectStore } from "./project";
 
 describe("useProjectStore", () => {
   let storage: Record<string, string>;
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const apiTimestamp = "2026-05-08T00:00:00Z";
+
+  function apiProject(id: string, name: string, doc: unknown) {
+    return {
+      id,
+      name,
+      doc,
+      createdAt: apiTimestamp,
+      updatedAt: apiTimestamp
+    };
+  }
+
+  function apiProjectDoc(id: string, name: string) {
+    return createDefaultProjectDoc({
+      id,
+      name,
+      updatedAt: apiTimestamp
+    });
+  }
 
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -308,6 +328,82 @@ describe("useProjectStore", () => {
     expect(store.selectedWidget?.props.assetId).toBeUndefined();
   });
 
+  it("replaces migrated asset ids across ProjectDoc assets and references", () => {
+    const store = useProjectStore();
+    const localImage = {
+      id: "local-heart",
+      projectId: "project-watch-demo",
+      name: "heart.png",
+      kind: "image" as const,
+      mimeType: "image/png",
+      sizeBytes: 128,
+      objectKey: "local://heart.png",
+      createdAt: "2026-05-08T00:00:00Z"
+    };
+    const cloudImage = {
+      ...localImage,
+      id: "asset-heart-cloud",
+      projectId: "project-1",
+      objectKey: "projects/project-1/assets/asset-heart-cloud/heart.png"
+    };
+    const localFont = {
+      id: "local-font",
+      projectId: "project-watch-demo",
+      name: "brand.ttf",
+      kind: "font" as const,
+      mimeType: "font/ttf",
+      sizeBytes: 2048,
+      objectKey: "local://brand.ttf",
+      createdAt: "2026-05-08T00:00:00Z"
+    };
+    const cloudFont = {
+      ...localFont,
+      id: "asset-font-cloud",
+      projectId: "project-1",
+      objectKey: "projects/project-1/assets/asset-font-cloud/brand.ttf"
+    };
+
+    store.registerAsset(localImage);
+    store.addWidgetFromCatalog("image", { x: 24, y: 32 });
+    store.bindSelectedImageAsset("local-heart");
+    store.registerAsset(localFont);
+    store.updateSelectedStyle({ font: "local-font" });
+    store.addProjectStyle();
+    store.updateProjectStyleText(store.project.styles[0]?.id, "font", "local-font");
+
+    store.replaceAssetReference("local-heart", cloudImage);
+    store.replaceAssetReference("local-font", cloudFont);
+
+    expect(store.project.assets).not.toContainEqual(expect.objectContaining({ id: "local-heart" }));
+    expect(store.project.assets).not.toContainEqual(expect.objectContaining({ id: "local-font" }));
+    expect(store.project.assets).toContainEqual(cloudImage);
+    expect(store.project.assets).toContainEqual(cloudFont);
+    expect(store.selectedWidget?.props.assetId).toBe("asset-heart-cloud");
+    expect(store.selectedWidget?.style.font).toBe("asset-font-cloud");
+    expect(store.project.styles[0]?.style.font).toBe("asset-font-cloud");
+  });
+
+  it("does not bind non-image assets to image widgets", () => {
+    const store = useProjectStore();
+    const fontAsset = {
+      id: "font-1",
+      projectId: "project-watch-demo",
+      name: "watch_digits.ttf",
+      kind: "font" as const,
+      mimeType: "font/ttf",
+      sizeBytes: 2048,
+      objectKey: "projects/project-watch-demo/assets/font-1/watch_digits.ttf",
+      createdAt: "2026-05-08T00:00:00Z"
+    };
+
+    store.registerAsset(fontAsset);
+    store.addWidgetFromCatalog("image", { x: 24, y: 32 });
+    store.bindSelectedImageAsset("font-1");
+
+    expect(store.selectedWidget?.type).toBe("image");
+    expect(store.selectedWidget?.props.assetId).toBeUndefined();
+  });
+
   it("removes font asset references from widget styles when unregistering an asset", () => {
     const store = useProjectStore();
     const fontAsset = {
@@ -323,18 +419,24 @@ describe("useProjectStore", () => {
 
     store.registerAsset(fontAsset);
     store.updateSelectedStyle({ font: "font-1" });
+    store.addProjectStyle();
+    const styleId = store.project.styles[0]?.id;
+    store.updateProjectStyleText(styleId, "font", "font-1");
 
     expect(store.project.assets).toContainEqual(fontAsset);
     expect(store.selectedWidget?.style.font).toBe("font-1");
+    expect(store.project.styles[0]?.style.font).toBe("font-1");
 
     store.unregisterAsset("font-1");
 
     expect(store.project.assets).toEqual([]);
     expect(store.selectedWidget?.style.font).toBeUndefined();
+    expect(store.project.styles[0]?.style.font).toBeUndefined();
 
     store.undo();
     expect(store.project.assets).toContainEqual(fontAsset);
     expect(store.selectedWidget?.style.font).toBe("font-1");
+    expect(store.project.styles[0]?.style.font).toBe("font-1");
   });
 
   it("moves, resizes and deletes the selected widget", () => {
@@ -433,6 +535,25 @@ describe("useProjectStore", () => {
     expect(store.activeScreen?.root.layout).toMatchObject({ width: 320, height: 240 });
   });
 
+  it("keeps target and theme updates schema-valid when input is unsupported", () => {
+    const store = useProjectStore();
+    const initialTarget = { ...store.project.target };
+    const initialRootLayout = { ...store.activeScreen!.root.layout };
+
+    store.updateTarget({ lvglVersion: "9.0" as never });
+    store.updateTarget({ deviceName: "   " });
+    store.updateTarget({ width: 320.5 });
+    store.updateTarget({ height: 0 });
+    store.updateTarget({ dpi: -1 });
+    store.updateTarget({ colorDepth: 24 as never });
+    store.updateTheme("solarized" as never);
+
+    expect(store.project.target).toEqual(initialTarget);
+    expect(store.activeScreen?.root.layout).toEqual(initialRootLayout);
+    expect(store.project.theme).toBe("dark");
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
   it("renames project, active screen and selected widget", () => {
     const store = useProjectStore();
 
@@ -463,6 +584,99 @@ describe("useProjectStore", () => {
 
     store.undo();
     expect(store.project.theme).toBe("dark");
+  });
+
+  it("manages reusable project styles and applies them to the selected widget", () => {
+    const store = useProjectStore();
+
+    store.selectWidget("start-button");
+    store.addProjectStyle();
+
+    const styleId = store.project.styles[0]?.id;
+    expect(styleId).toMatch(uuidPattern);
+    expect(store.project.styles[0]).toMatchObject({
+      name: "Style_1",
+      style: {
+        bgColor: "#2fbf9b",
+        textColor: "#FFFFFF",
+        radius: 8,
+        opacity: 100
+      }
+    });
+
+    store.renameProjectStyle(styleId, "Primary Button");
+    store.updateProjectStyleText(styleId, "bgColor", "#123456");
+    store.updateProjectStyleText(styleId, "textColor", "#F8FAFC");
+    store.updateProjectStyleText(styleId, "borderColor", "#C084FC");
+    store.updateProjectStyleText(styleId, "font", "lv_font_montserrat_32");
+    store.updateProjectStyleText(styleId, "align", "right");
+    store.updateProjectStyleNumber(styleId, "radius", "14");
+    store.updateProjectStyleNumber(styleId, "letterSpace", "2");
+    store.updateProjectStyleNumber(styleId, "lineSpace", "4");
+    store.updateProjectStylePaddingSide(styleId, "top", "6");
+    store.updateProjectStylePaddingSide(styleId, "right", "8");
+    store.updateProjectStylePaddingSide(styleId, "bottom", "10");
+    store.updateProjectStylePaddingSide(styleId, "left", "12");
+    store.applyProjectStyleToSelectedWidget(styleId);
+
+    expect(store.project.styles[0]).toMatchObject({
+      id: styleId,
+      name: "Primary Button",
+      style: {
+        bgColor: "#123456",
+        textColor: "#F8FAFC",
+        borderColor: "#C084FC",
+        font: "lv_font_montserrat_32",
+        align: "right",
+        radius: 14,
+        letterSpace: 2,
+        lineSpace: 4,
+        padding: { top: 6, right: 8, bottom: 10, left: 12 },
+        opacity: 100
+      }
+    });
+    expect(store.selectedWidget?.style).toMatchObject({
+      bgColor: "#123456",
+      textColor: "#F8FAFC",
+      borderColor: "#C084FC",
+      font: "lv_font_montserrat_32",
+      align: "right",
+      radius: 14,
+      letterSpace: 2,
+      lineSpace: 4,
+      padding: { top: 6, right: 8, bottom: 10, left: 12 },
+      opacity: 100
+    });
+
+    store.deleteProjectStyle(styleId);
+    expect(store.project.styles).toHaveLength(0);
+
+    store.undo();
+    expect(store.project.styles[0]?.name).toBe("Primary Button");
+  });
+
+  it("keeps reusable project style updates schema-valid when input is unsupported", () => {
+    const store = useProjectStore();
+    store.addProjectStyle();
+    const styleId = store.project.styles[0]?.id;
+    const initialStyle = { ...store.project.styles[0]?.style };
+
+    store.updateProjectStyleText(styleId, "bgColor", "red");
+    store.updateProjectStyleText(styleId, "textColor", "white");
+    store.updateProjectStyleText(styleId, "borderColor", "#12345");
+    store.updateProjectStyleText(styleId, "font", "missing-font");
+    expect(() => store.updateProjectStyleText(styleId, "font", 42 as never)).not.toThrow();
+    store.updateProjectStyleText(styleId, "align", "justify");
+    store.updateProjectStyleText(styleId, "blendMode", "screen");
+    store.updateProjectStyleText(styleId, "unsupportedToken" as never, "normal");
+    store.updateProjectStyleNumber(styleId, "unsupportedNumber" as never, "4");
+    store.updateProjectStylePaddingSide(styleId, "start" as never, "6");
+
+    expect(store.project.styles[0]?.style).toMatchObject(initialStyle);
+    expect(store.project.styles[0]?.style).not.toHaveProperty("unsupportedToken");
+    expect(store.project.styles[0]?.style).not.toHaveProperty("unsupportedNumber");
+    expect(store.project.styles[0]?.style.padding).toBeUndefined();
+    expect(validateProjectDoc(store.project).valid).toBe(true);
   });
 
   it("adds, switches and deletes screens while keeping one screen", () => {
@@ -629,6 +843,72 @@ describe("useProjectStore", () => {
     ]);
   });
 
+  it("keeps added event handler names from colliding with generated C symbols", () => {
+    const store = useProjectStore();
+
+    store.addEventBinding("LV_EVENT_CLICKED", "ui_Time_Label", "time-label");
+
+    expect(store.project.events).toContainEqual({
+      id: expect.stringMatching(uuidPattern),
+      widgetId: "time-label",
+      event: "LV_EVENT_CLICKED",
+      handlerName: "handler_ui_Time_Label"
+    });
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
+  it("checks event handler candidates with a non-conflicting temporary event id", () => {
+    const store = useProjectStore();
+
+    store.addEventBinding("LV_EVENT_READY", "existing_handler", "date-label");
+    store.project.events[0].id = "candidate-event";
+    store.addEventBinding("LV_EVENT_CLICKED", "ui_Time_Label", "time-label");
+
+    expect(store.project.events).toContainEqual(expect.objectContaining({
+      widgetId: "time-label",
+      event: "LV_EVENT_CLICKED",
+      handlerName: "handler_ui_Time_Label"
+    }));
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
+  it("keeps screen root event handlers from colliding with generated screen init symbols", () => {
+    const store = useProjectStore();
+
+    store.addEventBinding("LV_EVENT_READY", "ui_Screen_1_screen_init", "root-screen-1");
+
+    expect(store.project.events).toContainEqual(expect.objectContaining({
+      widgetId: "root-screen-1",
+      event: "LV_EVENT_READY",
+      handlerName: "handler_ui_Screen_1_screen_init"
+    }));
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
+  it("keeps event handlers from colliding with generated widget helper symbols", () => {
+    const store = useProjectStore();
+    store.addWidgetFromCatalog("chart", { x: 24, y: 32 });
+    const chartId = store.selectedWidget?.id;
+
+    store.addEventBinding("LV_EVENT_READY", "ui_Chart_1_series", chartId);
+
+    expect(store.project.events).toContainEqual(expect.objectContaining({
+      widgetId: chartId,
+      event: "LV_EVENT_READY",
+      handlerName: "handler_ui_Chart_1_series"
+    }));
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
+  it("keeps event binding updates schema-valid when input is unsupported", () => {
+    const store = useProjectStore();
+
+    store.addEventBinding("LV_EVENT_DELETE" as never, "on_delete", "time-label");
+
+    expect(store.project.events).toEqual([]);
+    expect(validateProjectDoc(store.project).valid).toBe(true);
+  });
+
   it("replaces an existing event binding for the same widget and event", () => {
     const store = useProjectStore();
 
@@ -698,6 +978,115 @@ describe("useProjectStore", () => {
     expect(store.dirty).toBe(true);
   });
 
+  it("keeps dirty state when the user edits while an existing cloud project save is in flight", async () => {
+    storage["lvgl-editor-token"] = "demo-token";
+    let resolveSave: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects/project-1" && (!init || init.method === undefined || init.method === "GET")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          project: apiProject(
+            "project-1",
+            "Cloud UI",
+            {
+              ...useProjectStore().project,
+              id: "project-1",
+              updatedAt: "2026-05-08T00:00:00Z"
+            }
+          )
+        }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return new Promise<Response>((resolve) => {
+          resolveSave = resolve;
+        });
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+    await store.openProject("project-1");
+    fetchMock.mockClear();
+
+    store.updateSelectedText("11:30");
+    const savePromise = store.saveProject();
+    store.updateSelectedText("12:45");
+    resolveSave?.(new Response(JSON.stringify({ projectId: "project-1", updatedAt: "2026-05-08T00:00:01Z" }), { status: 200 }));
+
+    await expect(savePromise).resolves.toBe(true);
+    expect(store.selectedWidget?.props.text).toBe("12:45");
+    expect(store.dirty).toBe(true);
+    expect(store.saveState).toBe("saved");
+  });
+
+  it("does not apply an old cloud save result after another project becomes active", async () => {
+    storage["lvgl-editor-token"] = "demo-token";
+    let resolveSave: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects/project-1" && (!init || init.method === undefined || init.method === "GET")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          project: apiProject("project-1", "Project One", apiProjectDoc("project-1", "Project One"))
+        }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-2" && (!init || init.method === undefined || init.method === "GET")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          project: apiProject("project-2", "Project Two", apiProjectDoc("project-2", "Project Two"))
+        }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return new Promise<Response>((resolve) => {
+          resolveSave = resolve;
+        });
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+    await store.openProject("project-1");
+
+    store.updateSelectedText("11:30");
+    const savePromise = store.saveProject();
+    await vi.waitFor(() => expect(resolveSave).toBeDefined());
+    await store.openProject("project-2");
+    resolveSave?.(new Response(JSON.stringify({ projectId: "project-1", updatedAt: "2026-05-08T00:00:01Z" }), { status: 200 }));
+
+    await expect(savePromise).resolves.toBe(false);
+    expect(store.project.id).toBe("project-2");
+    expect(store.project.updatedAt).toBe(apiTimestamp);
+    expect(store.dirty).toBe(false);
+    expect(store.saveState).toBe("saved");
+  });
+
+  it("keeps edits made while the first cloud save is in flight", async () => {
+    storage["lvgl-editor-token"] = "demo-token";
+    let resolveSave: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          project: apiProject("project-1", "My Watch UI", apiProjectDoc("project-1", "My Watch UI"))
+        }), { status: 201 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return new Promise<Response>((resolve) => {
+          resolveSave = resolve;
+        });
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+
+    store.updateSelectedText("11:30");
+    const savePromise = store.saveProject();
+    await vi.waitFor(() => expect(resolveSave).toBeDefined());
+    store.updateSelectedText("12:45");
+    resolveSave?.(new Response(JSON.stringify({ projectId: "project-1", updatedAt: "2026-05-08T00:00:01Z" }), { status: 200 }));
+
+    await expect(savePromise).resolves.toBe(true);
+    expect(store.project.id).toBe("project-1");
+    expect(store.selectedWidget?.props.text).toBe("12:45");
+    expect(store.dirty).toBe(true);
+  });
+
   it("marks the project dirty when undo or redo changes a saved document", async () => {
     const store = useProjectStore();
 
@@ -720,12 +1109,7 @@ describe("useProjectStore", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
-          project: {
-            id: "project-1",
-            name: "My Watch UI",
-            updatedAt: "2026-05-08T00:00:00Z",
-            doc: {}
-          }
+          project: apiProject("project-1", "My Watch UI", apiProjectDoc("project-1", "My Watch UI"))
         }), { status: 201 })
       )
       .mockResolvedValueOnce(
@@ -744,17 +1128,51 @@ describe("useProjectStore", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project-1/doc", expect.any(Object));
   });
 
+  it("rewrites asset project ids when the first cloud save migrates a local ProjectDoc", async () => {
+    storage["lvgl-editor-token"] = "demo-token";
+    const savedDocs: unknown[] = [];
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({
+          project: apiProject("project-1", "My Watch UI", apiProjectDoc("project-1", "My Watch UI"))
+        }), { status: 201 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        savedDocs.push(JSON.parse(String(init.body)).doc);
+        return Promise.resolve(new Response(JSON.stringify({ projectId: "project-1", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+    store.registerAsset({
+      id: "local-heart",
+      projectId: "project-watch-demo",
+      name: "heart.png",
+      kind: "image",
+      mimeType: "image/png",
+      width: 32,
+      height: 32,
+      sizeBytes: 128,
+      objectKey: "local://heart.png",
+      createdAt: "2026-05-08T00:00:00Z"
+    });
+
+    const saved = await store.saveProject();
+
+    expect(saved).toBe(true);
+    expect(store.project.id).toBe("project-1");
+    expect(store.project.assets[0]).toMatchObject({ id: "local-heart", projectId: "project-1" });
+    expect(savedDocs).toHaveLength(1);
+    expect(savedDocs[0]).toMatchObject({ id: "project-1", assets: [expect.objectContaining({ projectId: "project-1" })] });
+  });
+
   it("directly creates a cloud project for logged-in seeded ProjectDoc saves without a failing seed PUT", async () => {
     storage["lvgl-editor-token"] = "demo-token";
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
-          project: {
-            id: "project-1",
-            name: "My Watch UI",
-            updatedAt: "2026-05-08T00:00:00Z",
-            doc: {}
-          }
+          project: apiProject("project-1", "My Watch UI", apiProjectDoc("project-1", "My Watch UI"))
         }), { status: 201 })
       )
       .mockResolvedValueOnce(
@@ -778,12 +1196,7 @@ describe("useProjectStore", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({
-          project: {
-            id: "project-1",
-            name: "My Watch UI",
-            updatedAt: "2026-05-08T00:00:00Z",
-            doc: {}
-          }
+          project: apiProject("project-1", "My Watch UI", apiProjectDoc("project-1", "My Watch UI"))
         }), { status: 201 })
       )
       .mockResolvedValueOnce(
@@ -808,7 +1221,7 @@ describe("useProjectStore", () => {
     const store = useProjectStore();
 
     store.addWidgetFromCatalog("image", { x: 0, y: 0 });
-    store.bindSelectedImageAsset("missing-asset");
+    store.updateSelectedProps({ assetId: "missing-asset" });
     const saved = await store.saveProject();
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -849,7 +1262,7 @@ describe("useProjectStore", () => {
       updatedAt: "2026-05-08T00:00:00Z"
     };
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ project: { id: "project-2", name: "Cloud UI", doc: returnedDoc } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ project: apiProject("project-2", "Cloud UI", returnedDoc) }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ projectId: "project-2", updatedAt: "2026-05-13T10:00:00Z" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const store = useProjectStore();
@@ -891,15 +1304,20 @@ describe("useProjectStore", () => {
       events: [],
       updatedAt: "2026-05-08T00:00:00Z"
     };
+    const listedDoc = {
+      ...returnedDoc,
+      id: "project-1",
+      name: "My Watch UI"
+    };
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: "project-1", name: "My Watch UI" }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ project: { id: "project-2", name: "New UI", doc: returnedDoc } }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ project: { id: "project-2", name: "New UI", doc: returnedDoc } }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [apiProject("project-1", "My Watch UI", listedDoc)] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ project: apiProject("project-2", "New UI", returnedDoc) }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ project: apiProject("project-2", "New UI", returnedDoc) }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const store = useProjectStore();
 
     await store.loadProjects();
-    expect(store.projects).toEqual([{ id: "project-1", name: "My Watch UI" }]);
+    expect(store.projects).toMatchObject([{ id: "project-1", name: "My Watch UI" }]);
 
     await store.createCloudProject("New UI");
     expect(store.project.name).toBe("New UI");
@@ -908,6 +1326,197 @@ describe("useProjectStore", () => {
     await store.openProject("project-2");
     expect(store.project.id).toBe("project-2");
     expect(store.activeScreen?.name).toBe("Screen_1");
+  });
+
+  it("keeps the latest opened project when open requests resolve out of order", async () => {
+    let resolveProjectOne: (response: Response) => void = () => undefined;
+    let resolveProjectTwo: (response: Response) => void = () => undefined;
+    const projectOneResponse = new Promise<Response>((resolve) => {
+      resolveProjectOne = resolve;
+    });
+    const projectTwoResponse = new Promise<Response>((resolve) => {
+      resolveProjectTwo = resolve;
+    });
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/projects/project-1") {
+        return projectOneResponse;
+      }
+      if (url === "/api/projects/project-2") {
+        return projectTwoResponse;
+      }
+      return Promise.reject(new Error(`unexpected request ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+
+    const firstOpen = store.openProject("project-1");
+    const secondOpen = store.openProject("project-2");
+    resolveProjectTwo(new Response(JSON.stringify({
+      project: apiProject("project-2", "Project Two", apiProjectDoc("project-2", "Project Two"))
+    }), { status: 200 }));
+    await expect(secondOpen).resolves.toBe(true);
+
+    expect(store.project.id).toBe("project-2");
+    expect(store.project.name).toBe("Project Two");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBe("project-2");
+
+    resolveProjectOne(new Response(JSON.stringify({
+      project: apiProject("project-1", "Project One", apiProjectDoc("project-1", "Project One"))
+    }), { status: 200 }));
+    await expect(firstOpen).resolves.toBe(false);
+
+    expect(store.project.id).toBe("project-2");
+    expect(store.project.name).toBe("Project Two");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBe("project-2");
+  });
+
+  it("keeps the latest created cloud project when create requests resolve out of order", async () => {
+    let resolveProjectOne: (response: Response) => void = () => undefined;
+    let resolveProjectTwo: (response: Response) => void = () => undefined;
+    const projectOneResponse = new Promise<Response>((resolve) => {
+      resolveProjectOne = resolve;
+    });
+    const projectTwoResponse = new Promise<Response>((resolve) => {
+      resolveProjectTwo = resolve;
+    });
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/projects" && fetchMock.mock.calls.length === 1) {
+        return projectOneResponse;
+      }
+      if (url === "/api/projects" && fetchMock.mock.calls.length === 2) {
+        return projectTwoResponse;
+      }
+      return Promise.reject(new Error(`unexpected request ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+
+    const firstCreate = store.createCloudProject("Project One");
+    const secondCreate = store.createCloudProject("Project Two");
+    resolveProjectTwo(new Response(JSON.stringify({
+      project: apiProject("project-2", "Project Two", apiProjectDoc("project-2", "Project Two"))
+    }), { status: 201 }));
+    await secondCreate;
+
+    expect(store.project.id).toBe("project-2");
+    expect(store.project.name).toBe("Project Two");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBe("project-2");
+
+    resolveProjectOne(new Response(JSON.stringify({
+      project: apiProject("project-1", "Project One", apiProjectDoc("project-1", "Project One"))
+    }), { status: 201 }));
+    await firstCreate;
+
+    expect(store.project.id).toBe("project-2");
+    expect(store.project.name).toBe("Project Two");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBe("project-2");
+  });
+
+  it("keeps the latest project list when list requests resolve out of order", async () => {
+    let resolveFirstList: (response: Response) => void = () => undefined;
+    let resolveSecondList: (response: Response) => void = () => undefined;
+    const firstListResponse = new Promise<Response>((resolve) => {
+      resolveFirstList = resolve;
+    });
+    const secondListResponse = new Promise<Response>((resolve) => {
+      resolveSecondList = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(firstListResponse)
+      .mockReturnValueOnce(secondListResponse);
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+
+    const firstLoad = store.loadProjects();
+    const secondLoad = store.loadProjects();
+    resolveSecondList(new Response(JSON.stringify({
+      projects: [apiProject("project-2", "Project Two", apiProjectDoc("project-2", "Project Two"))]
+    }), { status: 200 }));
+    await secondLoad;
+
+    expect(store.projects).toMatchObject([{ id: "project-2", name: "Project Two" }]);
+
+    resolveFirstList(new Response(JSON.stringify({
+      projects: [apiProject("project-1", "Project One", apiProjectDoc("project-1", "Project One"))]
+    }), { status: 200 }));
+    await firstLoad;
+
+    expect(store.projects).toMatchObject([{ id: "project-2", name: "Project Two" }]);
+  });
+
+  it("clears stale cloud project list when the latest list request fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        projects: [apiProject("project-1", "Project One", apiProjectDoc("project-1", "Project One"))]
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: "PROJECT_LIST_FAILED", message: "project list failed" }
+      }), { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useProjectStore();
+
+    await store.loadProjects();
+    expect(store.projects).toMatchObject([{ id: "project-1", name: "Project One" }]);
+
+    await expect(store.loadProjects()).rejects.toMatchObject({
+      code: "PROJECT_LIST_FAILED",
+      status: 500
+    });
+    expect(store.projects).toEqual([]);
+  });
+
+  it("rejects an invalid opened project document without replacing the current project", async () => {
+    const store = useProjectStore();
+    const invalidDoc = {
+      ...store.project,
+      id: "project-bad",
+      name: "Broken UI",
+      screens: []
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ project: apiProject("project-bad", "Broken UI", invalidDoc) }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(store.openProject("project-bad")).rejects.toMatchObject({
+      code: "PROJECT_LOOKUP_FAILED",
+      detail: "project lookup failed with status 200"
+    });
+
+    expect(store.project.id).toBe("project-watch-demo");
+    expect(store.project.name).toBe("My Watch UI");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBeNull();
+    expect(store.saveState).toBe("saved");
+    expect(store.validationErrors).toEqual([]);
+  });
+
+  it("rejects an opened project document with invalid top-level contract fields", async () => {
+    const store = useProjectStore();
+    const invalidDoc = {
+      schemaVersion: 2,
+      id: "project-bad-contract",
+      name: "Broken Contract",
+      target: store.project.target,
+      theme: "solarized",
+      screens: store.project.screens,
+      assets: {},
+      styles: [],
+      events: [],
+      updatedAt: ""
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ project: apiProject("project-bad-contract", "Broken Contract", invalidDoc) }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(store.openProject("project-bad-contract")).rejects.toMatchObject({
+      code: "PROJECT_LOOKUP_FAILED",
+      detail: "project lookup failed with status 200"
+    });
+
+    expect(store.project.id).toBe("project-watch-demo");
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBeNull();
+    expect(store.validationErrors).toEqual([]);
   });
 
   it("restores the last opened cloud project from local storage", async () => {
@@ -942,7 +1551,7 @@ describe("useProjectStore", () => {
     };
     localStorage.setItem("lvgl-editor-last-project-id", "project-restored");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ project: { id: "project-restored", name: "Restored UI", doc: returnedDoc } }), { status: 200 })
+      new Response(JSON.stringify({ project: apiProject("project-restored", "Restored UI", returnedDoc) }), { status: 200 })
     );
     vi.stubGlobal("fetch", fetchMock);
     const store = useProjectStore();
@@ -952,5 +1561,63 @@ describe("useProjectStore", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-restored", expect.any(Object));
     expect(store.project.name).toBe("Restored UI");
     expect(store.project.target).toMatchObject({ width: 320, height: 240, dpi: 160 });
+  });
+
+  it("forgets the last opened cloud project when restore receives an invalid document", async () => {
+    localStorage.setItem("lvgl-editor-last-project-id", "project-bad");
+    const store = useProjectStore();
+    const invalidDoc = {
+      ...store.project,
+      id: "project-bad",
+      name: "Broken UI",
+      screens: []
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ project: apiProject("project-bad", "Broken UI", invalidDoc) }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await store.restoreLastProject();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-bad", expect.any(Object));
+    expect(localStorage.getItem("lvgl-editor-last-project-id")).toBeNull();
+    expect(store.project.id).toBe("project-watch-demo");
+    expect(store.validationErrors).toEqual([]);
+  });
+
+  it("keeps cloud project workflows usable when last-project storage methods fail", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem() {
+          throw new Error("read blocked");
+        },
+        setItem() {
+          throw new Error("write blocked");
+        },
+        removeItem() {
+          throw new Error("remove blocked");
+        }
+      }
+    });
+    setActivePinia(createPinia());
+    const returnedDoc = apiProjectDoc("project-2", "Cloud UI");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ project: apiProject("project-2", "Cloud UI", returnedDoc) }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const store = useProjectStore();
+
+      await expect(store.openProject("project-2")).resolves.toBe(true);
+      expect(store.project.id).toBe("project-2");
+      await expect(store.restoreLastProject()).resolves.toBeUndefined();
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      }
+    }
   });
 });

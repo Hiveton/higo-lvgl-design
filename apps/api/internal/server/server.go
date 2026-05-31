@@ -65,6 +65,10 @@ type createVersionRequest struct {
 	Label string `json:"label"`
 }
 
+type exportProjectRequest struct {
+	CreateVersion *bool `json:"createVersion"`
+}
+
 type projectVersionRecord struct {
 	ID        string         `json:"id"`
 	ProjectID string         `json:"projectId"`
@@ -159,13 +163,17 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 
 func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
 	var payload loginRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
+	if err := validateLoginRequest(payload); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_LOGIN_REQUEST", err.Error())
 		return
 	}
 	user, err := server.userRepo.FindByEmail(request.Context(), payload.Email)
 	if err != nil || !auth.VerifyPassword(user.PasswordHash, payload.Password) {
-		writeError(writer, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid email or password")
+		writeError(writer, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid email or password")
 		return
 	}
 
@@ -190,6 +198,16 @@ func (server *Server) me(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, user)
 }
 
+func validateLoginRequest(payload loginRequest) error {
+	if strings.TrimSpace(payload.Email) == "" {
+		return fmt.Errorf("email is required")
+	}
+	if strings.TrimSpace(payload.Password) == "" {
+		return fmt.Errorf("password is required")
+	}
+	return nil
+}
+
 func (server *Server) listProjects(writer http.ResponseWriter, request *http.Request) {
 	user, _ := server.userFromRequest(request)
 	server.mu.RLock()
@@ -206,7 +224,7 @@ func (server *Server) listProjects(writer http.ResponseWriter, request *http.Req
 
 func (server *Server) createProject(writer http.ResponseWriter, request *http.Request) {
 	var payload createProjectRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -222,11 +240,16 @@ func (server *Server) createProject(writer http.ResponseWriter, request *http.Re
 	id := fmt.Sprintf("project-%d", server.nextID)
 	server.nextID++
 	now := time.Now().UTC().Format(time.RFC3339)
+	doc := defaultProjectDoc(id, payload.Name, payload.Target, now)
+	if err := validateProjectDoc(doc, id); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_PROJECT_DOC", err.Error())
+		return
+	}
 	project := projectRecord{
 		ID:        id,
 		OwnerID:   user.ID,
 		Name:      payload.Name,
-		Doc:       defaultProjectDoc(id, payload.Name, payload.Target, now),
+		Doc:       doc,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -247,7 +270,7 @@ func (server *Server) getProject(writer http.ResponseWriter, request *http.Reque
 func (server *Server) saveProjectDoc(writer http.ResponseWriter, request *http.Request) {
 	projectID := chi.URLParam(request, "projectId")
 	var payload saveDocRequest
-	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+	if err := decodeJSON(request, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -281,7 +304,7 @@ func (server *Server) createProjectVersion(writer http.ResponseWriter, request *
 	projectID := chi.URLParam(request, "projectId")
 	var payload createVersionRequest
 	if request.Body != nil {
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil && err != io.EOF {
+		if err := decodeJSON(request, &payload); err != nil && err != io.EOF {
 			writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 			return
 		}
@@ -315,6 +338,10 @@ func (server *Server) uploadAsset(writer http.ResponseWriter, request *http.Requ
 
 	if err := request.ParseMultipartForm(5 << 20); err != nil {
 		writeError(writer, http.StatusBadRequest, "INVALID_MULTIPART", "invalid multipart form")
+		return
+	}
+	if err := validateAssetUploadMultipartForm(request); err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_MULTIPART", err.Error())
 		return
 	}
 	file, header, err := request.FormFile("file")
@@ -427,7 +454,7 @@ func (server *Server) deleteAsset(writer http.ResponseWriter, request *http.Requ
 	for index, asset := range assets {
 		if asset.ID == assetID {
 			if projectDocReferencesAsset(project.Doc, assetID) {
-				writeError(writer, http.StatusConflict, "ASSET_IN_USE", "asset is used by image widget")
+				writeError(writer, http.StatusConflict, "ASSET_IN_USE", "asset is still referenced by ProjectDoc")
 				return
 			}
 			server.assets[projectID] = append(assets[:index], assets[index+1:]...)
@@ -441,6 +468,11 @@ func (server *Server) deleteAsset(writer http.ResponseWriter, request *http.Requ
 func (server *Server) exportProjectC(writer http.ResponseWriter, request *http.Request) {
 	projectID := chi.URLParam(request, "projectId")
 	user, _ := server.userFromRequest(request)
+	createVersion, err := shouldCreateExportVersion(request)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
+		return
+	}
 
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -450,7 +482,9 @@ func (server *Server) exportProjectC(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
 		return
 	}
-	server.snapshotProjectVersion(project, "Build snapshot")
+	if createVersion {
+		server.snapshotProjectVersion(project, "Build snapshot")
+	}
 
 	jobID := fmt.Sprintf("job-%d", server.nextJobID)
 	server.nextJobID++
@@ -475,7 +509,15 @@ func (server *Server) exportProjectC(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusAccepted, map[string]any{"jobId": jobID})
 		return
 	}
-	server.hydrateInMemoryAssetData(projectID, doc.Assets)
+	if err := server.hydrateInMemoryAssetData(projectID, doc.Assets); err != nil {
+		job.Status = "failed"
+		job.Progress = 100
+		job.Error = map[string]any{"code": "ASSET_LOAD_FAILED", "message": err.Error()}
+		job.Logs = append(job.Logs, jobLog{Time: now, Level: "error", Message: err.Error()})
+		server.jobs[jobID] = job
+		writeJSON(writer, http.StatusAccepted, map[string]any{"jobId": jobID})
+		return
+	}
 	archive, err := codegen.GenerateCZip(doc)
 	if err != nil {
 		job.Status = "failed"
@@ -490,7 +532,6 @@ func (server *Server) exportProjectC(writer http.ResponseWriter, request *http.R
 	job.Logs = append(job.Logs, jobLog{Time: now, Level: "info", Message: "Build completed successfully"})
 	job.Result = map[string]any{
 		"downloadUrl": fmt.Sprintf("/api/jobs/%s/download", jobID),
-		"sizeBytes":   len(archive),
 	}
 	job.Archive = archive
 	server.jobs[jobID] = job
@@ -498,19 +539,22 @@ func (server *Server) exportProjectC(writer http.ResponseWriter, request *http.R
 	writeJSON(writer, http.StatusAccepted, map[string]any{"jobId": jobID})
 }
 
-func (server *Server) hydrateInMemoryAssetData(projectID string, assets []codegen.AssetRef) {
+func (server *Server) hydrateInMemoryAssetData(projectID string, assets []codegen.AssetRef) error {
 	assetsByObjectKey := map[string][]byte{}
 	for _, asset := range server.assets[projectID] {
 		assetsByObjectKey[asset.ObjectKey] = asset.Content
 	}
 	for index := range assets {
-		if assets[index].ObjectKey == "" {
+		if assets[index].Kind != "image" || assets[index].ObjectKey == "" {
 			continue
 		}
 		if content, ok := assetsByObjectKey[assets[index].ObjectKey]; ok {
 			assets[index].Data = append([]byte(nil), content...)
+			continue
 		}
+		return fmt.Errorf("load asset %s: asset content not found", assets[index].Name)
 	}
+	return nil
 }
 
 func (server *Server) getJob(writer http.ResponseWriter, request *http.Request) {
@@ -541,7 +585,7 @@ func (server *Server) downloadJobResult(writer http.ResponseWriter, request *htt
 		writeError(writer, http.StatusNotFound, "JOB_NOT_FOUND", "job not found")
 		return
 	}
-	if len(job.Archive) == 0 {
+	if job.Status != "succeeded" || len(job.Archive) == 0 {
 		writeError(writer, http.StatusNotFound, "JOB_RESULT_NOT_FOUND", "job result not found")
 		return
 	}
@@ -585,6 +629,26 @@ func (request createVersionRequest) versionName() string {
 		return strings.TrimSpace(request.Name)
 	}
 	return strings.TrimSpace(request.Label)
+}
+
+func shouldCreateExportVersion(request *http.Request) (bool, error) {
+	if request.Body == nil {
+		return true, nil
+	}
+	defer request.Body.Close()
+	var payload exportProjectRequest
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decodeSingleJSONValue(decoder, &payload); err != nil {
+		if err == io.EOF {
+			return true, nil
+		}
+		return false, err
+	}
+	if payload.CreateVersion == nil {
+		return true, nil
+	}
+	return *payload.CreateVersion, nil
 }
 
 func (server *Server) userFromRequest(request *http.Request) (userRecord, bool) {
@@ -671,6 +735,19 @@ func valueOrDefault[T any](values map[string]any, key string, fallback T) any {
 }
 
 func projectDocReferencesAsset(doc map[string]any, assetID string) bool {
+	styles, _ := doc["styles"].([]any)
+	for _, styleValue := range styles {
+		styleDef, ok := styleValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		style, _ := styleDef["style"].(map[string]any)
+		if style != nil {
+			if value, ok := style["font"].(string); ok && value == assetID {
+				return true
+			}
+		}
+	}
 	screens, ok := doc["screens"].([]any)
 	if !ok {
 		return false
@@ -724,6 +801,12 @@ func mapToCodegenProject(doc map[string]any) (codegen.ProjectDoc, error) {
 }
 
 func validateProjectDoc(doc map[string]any, expectedProjectID string) error {
+	if err := validateRawProjectShapeFields(doc); err != nil {
+		return err
+	}
+	if err := validateRawProjectIntegerFields(doc); err != nil {
+		return err
+	}
 	project, err := mapToCodegenProject(doc)
 	if err != nil {
 		return err
@@ -746,13 +829,16 @@ func validateProjectDoc(doc map[string]any, expectedProjectID string) error {
 	if strings.TrimSpace(project.UpdatedAt) == "" {
 		return fmt.Errorf("ProjectDoc updatedAt is required")
 	}
+	if !isUTCDateTime(project.UpdatedAt) {
+		return fmt.Errorf("ProjectDoc updatedAt must be a UTC date-time string")
+	}
 	if err := validateProjectTarget(project.Target); err != nil {
 		return err
 	}
 	if len(project.Screens) == 0 {
 		return fmt.Errorf("ProjectDoc must contain at least one screen")
 	}
-	assetIDs, err := validateProjectAssets(doc, project.ID)
+	assetKinds, err := validateProjectAssets(doc, project.ID)
 	if err != nil {
 		return err
 	}
@@ -778,13 +864,12 @@ func validateProjectDoc(doc map[string]any, expectedProjectID string) error {
 		if screen.Root.Type != "screen" {
 			return fmt.Errorf("screen root widget type must be screen")
 		}
-		names := map[string]struct{}{}
 		ids := map[string]struct{}{}
-		if err := validateWidgetTree(screen.Root, nil, names, ids, projectWidgetIDs, assetIDs); err != nil {
+		if err := validateWidgetTree(screen.Root, nil, ids, projectWidgetIDs, assetKinds); err != nil {
 			return err
 		}
 	}
-	if err := validateProjectStyles(project.Styles); err != nil {
+	if err := validateProjectStyles(project.Styles, assetKinds); err != nil {
 		return err
 	}
 	if err := validateProjectEvents(project.Events, projectWidgetIDs); err != nil {
@@ -793,7 +878,317 @@ func validateProjectDoc(doc map[string]any, expectedProjectID string) error {
 	return nil
 }
 
-func validateProjectStyles(styles []codegen.StyleDef) error {
+func validateRawProjectShapeFields(doc map[string]any) error {
+	if err := validateAllowedRawFields(doc, "", "ProjectDoc", []string{"schemaVersion", "id", "name", "target", "theme", "screens", "assets", "styles", "events", "updatedAt"}); err != nil {
+		return err
+	}
+	if target, ok := doc["target"].(map[string]any); ok {
+		if err := validateAllowedRawFields(target, "", "target", []string{"lvglVersion", "deviceName", "width", "height", "dpi", "colorDepth"}); err != nil {
+			return err
+		}
+	}
+	for _, rawAsset := range rawArray(doc["assets"]) {
+		asset, ok := rawAsset.(map[string]any)
+		if !ok {
+			continue
+		}
+		assetID := stringValue(asset["id"], "asset")
+		if err := validateAllowedRawFields(asset, assetID, "asset", []string{"id", "projectId", "name", "kind", "mimeType", "width", "height", "sizeBytes", "objectKey", "createdAt"}); err != nil {
+			return err
+		}
+	}
+	for _, rawScreen := range rawArray(doc["screens"]) {
+		screen, ok := rawScreen.(map[string]any)
+		if !ok {
+			continue
+		}
+		screenID := stringValue(screen["id"], "screen")
+		if err := validateAllowedRawFields(screen, screenID, "screen", []string{"id", "name", "root"}); err != nil {
+			return err
+		}
+		root, ok := screen["root"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateRawWidgetShapeFields(root); err != nil {
+			return err
+		}
+	}
+	for _, rawStyle := range rawArray(doc["styles"]) {
+		styleDef, ok := rawStyle.(map[string]any)
+		if !ok {
+			continue
+		}
+		styleID := stringValue(styleDef["id"], "style")
+		if err := validateAllowedRawFields(styleDef, styleID, "style entry", []string{"id", "name", "style"}); err != nil {
+			return err
+		}
+		style, ok := styleDef["style"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateRawStyleShapeFields(style, styleID); err != nil {
+			return err
+		}
+	}
+	for _, rawEvent := range rawArray(doc["events"]) {
+		event, ok := rawEvent.(map[string]any)
+		if !ok {
+			continue
+		}
+		eventID := stringValue(event["id"], "event")
+		if err := validateAllowedRawFields(event, eventID, "event", []string{"id", "widgetId", "event", "handlerName"}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRawWidgetShapeFields(widget map[string]any) error {
+	widgetID := stringValue(widget["id"], "widget")
+	if err := validateAllowedRawFields(widget, widgetID, "widget", []string{"id", "type", "name", "parentId", "children", "layout", "props", "style", "locked", "hidden"}); err != nil {
+		return err
+	}
+	if layout, ok := widget["layout"].(map[string]any); ok {
+		if err := validateAllowedRawFields(layout, widgetID, "layout", []string{"x", "y", "width", "height", "align", "flex"}); err != nil {
+			return err
+		}
+		if flex, ok := layout["flex"].(map[string]any); ok {
+			if err := validateRawFlexShapeFields(flex, widgetID); err != nil {
+				return err
+			}
+		}
+	}
+	if style, ok := widget["style"].(map[string]any); ok {
+		if err := validateRawStyleShapeFields(style, widgetID); err != nil {
+			return err
+		}
+	}
+	for _, rawChild := range rawArray(widget["children"]) {
+		child, ok := rawChild.(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateRawWidgetShapeFields(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAllowedRawFields(record map[string]any, ownerID string, label string, allowedFields []string) error {
+	allowed := map[string]struct{}{}
+	for _, field := range allowedFields {
+		allowed[field] = struct{}{}
+	}
+	for field := range record {
+		if _, ok := allowed[field]; ok {
+			continue
+		}
+		if ownerID == "" {
+			return fmt.Errorf("unsupported %s field %s", label, field)
+		}
+		return fmt.Errorf("unsupported %s field %s: %s", label, field, ownerID)
+	}
+	return nil
+}
+
+func validateRawFlexShapeFields(flex map[string]any, ownerID string) error {
+	for field := range flex {
+		if field != "direction" && field != "gap" && field != "wrap" {
+			return fmt.Errorf("unsupported flex field %s: %s", field, ownerID)
+		}
+	}
+	if value, ok := flex["wrap"]; ok {
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("flex wrap must be a boolean: %s", ownerID)
+		}
+	}
+	return nil
+}
+
+func validateRawStyleShapeFields(style map[string]any, ownerID string) error {
+	for field := range style {
+		switch field {
+		case "opacity", "blendMode", "bgColor", "textColor", "borderColor", "radius", "padding", "font", "lineSpace", "letterSpace", "align":
+		default:
+			return fmt.Errorf("unsupported style field %s: %s", field, ownerID)
+		}
+	}
+	padding, ok := style["padding"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for side := range padding {
+		if side != "top" && side != "right" && side != "bottom" && side != "left" {
+			return fmt.Errorf("unsupported style padding field %s: %s", side, ownerID)
+		}
+	}
+	return nil
+}
+
+func validateRawProjectIntegerFields(doc map[string]any) error {
+	if err := validateRawTargetIntegerFields(doc); err != nil {
+		return err
+	}
+	for _, rawScreen := range rawArray(doc["screens"]) {
+		screen, ok := rawScreen.(map[string]any)
+		if !ok {
+			continue
+		}
+		root, ok := screen["root"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateRawWidgetIntegerFields(root); err != nil {
+			return err
+		}
+	}
+	for _, rawStyle := range rawArray(doc["styles"]) {
+		styleDef, ok := rawStyle.(map[string]any)
+		if !ok {
+			continue
+		}
+		style, ok := styleDef["style"].(map[string]any)
+		if !ok {
+			continue
+		}
+		styleID := stringValue(styleDef["id"], "style")
+		if err := validateRawStyleIntegerFields(style, styleID); err != nil {
+			return err
+		}
+	}
+	return validateRawAssetIntegerFields(doc)
+}
+
+func validateRawTargetIntegerFields(doc map[string]any) error {
+	target, ok := doc["target"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for _, field := range []string{"width", "height", "dpi", "colorDepth"} {
+		if err := validateRawIntegerField(target, field, fmt.Sprintf("target %s", field), ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRawWidgetIntegerFields(widget map[string]any) error {
+	widgetID := stringValue(widget["id"], "widget")
+	if layout, ok := widget["layout"].(map[string]any); ok {
+		for _, field := range []string{"x", "y", "width", "height"} {
+			if err := validateRawIntegerField(layout, field, fmt.Sprintf("widget %s", field), widgetID); err != nil {
+				return err
+			}
+		}
+		if flex, ok := layout["flex"].(map[string]any); ok {
+			if err := validateRawIntegerField(flex, "gap", "flex gap", widgetID); err != nil {
+				return err
+			}
+		}
+	}
+	if style, ok := widget["style"].(map[string]any); ok {
+		if err := validateRawStyleIntegerFields(style, widgetID); err != nil {
+			return err
+		}
+	}
+	for _, rawChild := range rawArray(widget["children"]) {
+		child, ok := rawChild.(map[string]any)
+		if !ok {
+			continue
+		}
+		if err := validateRawWidgetIntegerFields(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRawStyleIntegerFields(style map[string]any, ownerID string) error {
+	for _, field := range []string{"opacity", "radius", "letterSpace", "lineSpace"} {
+		if err := validateRawIntegerField(style, field, fmt.Sprintf("style %s", field), ownerID); err != nil {
+			return err
+		}
+	}
+	padding, ok := style["padding"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for _, side := range []string{"top", "right", "bottom", "left"} {
+		if err := validateRawIntegerField(padding, side, "style padding", ownerID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRawAssetIntegerFields(doc map[string]any) error {
+	rawAssets, ok := doc["assets"]
+	if !ok {
+		return nil
+	}
+	assets, ok := rawAssets.([]any)
+	if !ok {
+		return nil
+	}
+	for _, rawAsset := range assets {
+		asset, ok := rawAsset.(map[string]any)
+		if !ok {
+			continue
+		}
+		assetID := stringValue(asset["id"], "asset")
+		for _, field := range []string{"width", "height", "sizeBytes"} {
+			if err := validateRawIntegerField(asset, field, fmt.Sprintf("asset %s", field), assetID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateRawIntegerField(record map[string]any, field string, label string, ownerID string) error {
+	value, exists := record[field]
+	if !exists {
+		return nil
+	}
+	switch number := value.(type) {
+	case float64:
+		if math.Trunc(number) != number {
+			return rawIntegerError(label, "integer", ownerID)
+		}
+	case float32:
+		if math.Trunc(float64(number)) != float64(number) {
+			return rawIntegerError(label, "integer", ownerID)
+		}
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return nil
+	default:
+		return rawIntegerError(label, "number", ownerID)
+	}
+	return nil
+}
+
+func rawIntegerError(label string, kind string, ownerID string) error {
+	article := "a"
+	if kind == "integer" {
+		article = "an"
+	}
+	if ownerID == "" {
+		return fmt.Errorf("%s must be %s %s", label, article, kind)
+	}
+	return fmt.Errorf("%s must be %s %s: %s", label, article, kind, ownerID)
+}
+
+func rawArray(value any) []any {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	return items
+}
+
+func validateProjectStyles(styles []codegen.StyleDef, assetKinds map[string]string) error {
 	styleIDs := map[string]struct{}{}
 	for _, style := range styles {
 		if strings.TrimSpace(style.ID) == "" {
@@ -809,15 +1204,26 @@ func validateProjectStyles(styles []codegen.StyleDef) error {
 		if err := validateWidgetStyle(style.ID, style.Style); err != nil {
 			return err
 		}
+		if style.Style.Font != "" && !isBuiltInLvglFont(style.Style.Font) {
+			if err := validateFontAssetKind(style.Style.Font, assetKinds); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 func validateProjectEvents(events []codegen.EventBinding, projectWidgetIDs map[string]struct{}) error {
+	eventIDs := map[string]struct{}{}
+	callbackSymbols := map[string]string{}
 	for _, event := range events {
 		if strings.TrimSpace(event.ID) == "" {
 			return fmt.Errorf("event id is required")
 		}
+		if _, ok := eventIDs[event.ID]; ok {
+			return fmt.Errorf("event id must be unique: %s", event.ID)
+		}
+		eventIDs[event.ID] = struct{}{}
 		if strings.TrimSpace(event.WidgetID) == "" {
 			return fmt.Errorf("event widgetId is required: %s", event.ID)
 		}
@@ -830,8 +1236,38 @@ func validateProjectEvents(events []codegen.EventBinding, projectWidgetIDs map[s
 		if strings.TrimSpace(event.HandlerName) == "" {
 			return fmt.Errorf("event handlerName is required: %s", event.ID)
 		}
+		handlerName := strings.TrimSpace(event.HandlerName)
+		callbackName := eventCallbackSymbol(handlerName)
+		if previousHandler, ok := callbackSymbols[callbackName]; ok && previousHandler != handlerName {
+			return fmt.Errorf("event handlerName must generate a unique C callback symbol: %s", callbackName)
+		}
+		callbackSymbols[callbackName] = handlerName
 	}
 	return nil
+}
+
+func eventCallbackSymbol(name string) string {
+	var builder strings.Builder
+	previousWasSeparator := false
+	for _, char := range name {
+		if (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			builder.WriteRune(char)
+			previousWasSeparator = false
+			continue
+		}
+		if !previousWasSeparator {
+			builder.WriteByte('_')
+			previousWasSeparator = true
+		}
+	}
+	cleaned := strings.Trim(builder.String(), "_")
+	if cleaned == "" {
+		cleaned = "Widget"
+	}
+	if cleaned[0] >= '0' && cleaned[0] <= '9' {
+		cleaned = "_" + cleaned
+	}
+	return cleaned
 }
 
 var supportedEventTypes = map[string]struct{}{
@@ -863,7 +1299,7 @@ func validateProjectTarget(target codegen.TargetConfig) error {
 	return nil
 }
 
-func validateProjectAssets(doc map[string]any, projectID string) (map[string]struct{}, error) {
+func validateProjectAssets(doc map[string]any, projectID string) (map[string]string, error) {
 	rawAssets, ok := doc["assets"]
 	if !ok {
 		return nil, fmt.Errorf("ProjectDoc assets is required")
@@ -876,12 +1312,12 @@ func validateProjectAssets(doc map[string]any, projectID string) (map[string]str
 	if err := json.Unmarshal(raw, &assets); err != nil {
 		return nil, err
 	}
-	assetIDs := map[string]struct{}{}
+	assetKinds := map[string]string{}
 	for _, asset := range assets {
 		if strings.TrimSpace(asset.ID) == "" {
 			return nil, fmt.Errorf("asset id is required")
 		}
-		if _, ok := assetIDs[asset.ID]; ok {
+		if _, ok := assetKinds[asset.ID]; ok {
 			return nil, fmt.Errorf("asset id must be unique: %s", asset.ID)
 		}
 		if strings.TrimSpace(asset.ProjectID) == "" {
@@ -899,6 +1335,12 @@ func validateProjectAssets(doc map[string]any, projectID string) (map[string]str
 		if strings.TrimSpace(asset.MimeType) == "" {
 			return nil, fmt.Errorf("asset mimeType is required: %s", asset.ID)
 		}
+		if asset.Kind == "image" && !isSupportedImageMimeType(asset.MimeType) {
+			return nil, fmt.Errorf("unsupported image asset mimeType: %s", asset.ID)
+		}
+		if asset.Kind == "font" && !isSupportedFontMimeType(asset.MimeType) {
+			return nil, fmt.Errorf("unsupported font asset mimeType: %s", asset.ID)
+		}
 		if asset.Width < 0 {
 			return nil, fmt.Errorf("asset width must be non-negative: %s", asset.ID)
 		}
@@ -914,12 +1356,23 @@ func validateProjectAssets(doc map[string]any, projectID string) (map[string]str
 		if strings.TrimSpace(asset.CreatedAt) == "" {
 			return nil, fmt.Errorf("asset createdAt is required: %s", asset.ID)
 		}
-		assetIDs[asset.ID] = struct{}{}
+		if !isUTCDateTime(asset.CreatedAt) {
+			return nil, fmt.Errorf("asset createdAt must be a UTC date-time string: %s", asset.ID)
+		}
+		assetKinds[asset.ID] = asset.Kind
 	}
-	return assetIDs, nil
+	return assetKinds, nil
 }
 
-func validateWidgetTree(widget codegen.WidgetNode, expectedParentID *string, names map[string]struct{}, ids map[string]struct{}, projectWidgetIDs map[string]struct{}, assetIDs map[string]struct{}) error {
+func isUTCDateTime(value string) bool {
+	if !strings.HasSuffix(value, "Z") {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, value)
+	return err == nil
+}
+
+func validateWidgetTree(widget codegen.WidgetNode, expectedParentID *string, ids map[string]struct{}, projectWidgetIDs map[string]struct{}, assetKinds map[string]string) error {
 	if strings.TrimSpace(widget.ID) == "" {
 		return fmt.Errorf("widget id is required")
 	}
@@ -927,6 +1380,9 @@ func validateWidgetTree(widget codegen.WidgetNode, expectedParentID *string, nam
 		return fmt.Errorf("widget id must be unique within a screen: %s", widget.ID)
 	}
 	ids[widget.ID] = struct{}{}
+	if _, ok := projectWidgetIDs[widget.ID]; ok {
+		return fmt.Errorf("widget id must be unique across project: %s", widget.ID)
+	}
 	projectWidgetIDs[widget.ID] = struct{}{}
 	if !sameParentID(widget.ParentID, expectedParentID) {
 		return fmt.Errorf("widget parentId must be %s", parentIDLabel(expectedParentID))
@@ -937,11 +1393,7 @@ func validateWidgetTree(widget codegen.WidgetNode, expectedParentID *string, nam
 	if strings.TrimSpace(widget.Name) == "" {
 		return fmt.Errorf("widget name is required: %s", widget.ID)
 	}
-	if _, ok := names[widget.Name]; ok {
-		return fmt.Errorf("widget name must be unique within a screen: %s", widget.Name)
-	}
-	names[widget.Name] = struct{}{}
-	if err := validateWidgetLayout(widget.ID, widget.Layout); err != nil {
+	if err := validateWidgetLayout(widget.ID, widget.Type, widget.Layout); err != nil {
 		return err
 	}
 	if err := validateWidgetStyle(widget.ID, widget.Style); err != nil {
@@ -952,20 +1404,35 @@ func validateWidgetTree(widget codegen.WidgetNode, expectedParentID *string, nam
 	}
 	if widget.Type == "image" {
 		if assetID, ok := widget.Props["assetId"].(string); ok && assetID != "" {
-			if _, exists := assetIDs[assetID]; !exists {
+			kind, exists := assetKinds[assetID]
+			if !exists {
 				return fmt.Errorf("image widget references missing asset: %s", assetID)
+			}
+			if kind != "image" {
+				return fmt.Errorf("image widget must reference an image asset: %s", assetID)
 			}
 		}
 	}
 	if widget.Style.Font != "" && !isBuiltInLvglFont(widget.Style.Font) {
-		if _, exists := assetIDs[widget.Style.Font]; !exists {
-			return fmt.Errorf("font style references missing asset: %s", widget.Style.Font)
+		if err := validateFontAssetKind(widget.Style.Font, assetKinds); err != nil {
+			return err
 		}
 	}
 	for _, child := range widget.Children {
-		if err := validateWidgetTree(child, &widget.ID, names, ids, projectWidgetIDs, assetIDs); err != nil {
+		if err := validateWidgetTree(child, &widget.ID, ids, projectWidgetIDs, assetKinds); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateFontAssetKind(font string, assetKinds map[string]string) error {
+	kind, exists := assetKinds[font]
+	if !exists {
+		return fmt.Errorf("font style references missing asset: %s", font)
+	}
+	if kind != "font" {
+		return fmt.Errorf("font style must reference a font asset: %s", font)
 	}
 	return nil
 }
@@ -987,6 +1454,9 @@ func isBuiltInLvglFont(font string) bool {
 }
 
 func validateWidgetProps(widget codegen.WidgetNode) error {
+	if err := validateWidgetPropTypes(widget); err != nil {
+		return err
+	}
 	switch widget.Type {
 	case "spinner":
 		if err := validatePositiveWidgetProp(widget, "spinTime"); err != nil {
@@ -999,6 +1469,9 @@ func validateWidgetProps(widget codegen.WidgetNode) error {
 		if err := validatePositiveWidgetProp(widget, "pointCount"); err != nil {
 			return err
 		}
+		if err := validateRangeWidgetProps(widget); err != nil {
+			return err
+		}
 		if err := validateChartValuesWidgetProp(widget); err != nil {
 			return err
 		}
@@ -1006,10 +1479,142 @@ func validateWidgetProps(widget codegen.WidgetNode) error {
 		if err := validateNonNegativeWidgetProp(widget, "selected"); err != nil {
 			return err
 		}
+		if err := validateDropdownSelectedWidgetProp(widget); err != nil {
+			return err
+		}
 	case "slider", "bar", "arc":
 		if err := validateNonNegativeWidgetProp(widget, "value"); err != nil {
 			return err
 		}
+		if err := validateRangeWidgetProps(widget); err != nil {
+			return err
+		}
+		if err := validateRangeValueWidgetProp(widget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateWidgetPropTypes(widget codegen.WidgetNode) error {
+	switch widget.Type {
+	case "label", "button", "checkbox", "dropdown":
+		if err := validateStringWidgetProp(widget, "text"); err != nil {
+			return err
+		}
+	}
+	switch widget.Type {
+	case "checkbox", "switch":
+		if err := validateBoolWidgetProp(widget, "checked"); err != nil {
+			return err
+		}
+	case "image":
+		if err := validateStringWidgetProp(widget, "assetId"); err != nil {
+			return err
+		}
+	case "dropdown":
+		if err := validateStringWidgetProp(widget, "options"); err != nil {
+			return err
+		}
+		if err := validateNumberWidgetProp(widget, "selected"); err != nil {
+			return err
+		}
+	case "spinner":
+		if err := validateNumberWidgetProp(widget, "spinTime"); err != nil {
+			return err
+		}
+		if err := validateNumberWidgetProp(widget, "arcLength"); err != nil {
+			return err
+		}
+	case "chart":
+		for _, propName := range []string{"min", "max", "pointCount"} {
+			if err := validateNumberWidgetProp(widget, propName); err != nil {
+				return err
+			}
+		}
+	case "slider", "bar", "arc":
+		for _, propName := range []string{"min", "max", "value"} {
+			if err := validateNumberWidgetProp(widget, propName); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateNumberWidgetProp(widget codegen.WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists && !isFiniteWidgetNumber(value) {
+		return fmt.Errorf("widget prop %s must be a number: %s", propName, widget.ID)
+	}
+	if value, exists := widget.Props[propName]; exists && isFiniteWidgetNumber(value) && !isIntegerWidgetNumber(value) {
+		return fmt.Errorf("widget prop %s must be an integer: %s", propName, widget.ID)
+	}
+	return nil
+}
+
+func validateStringWidgetProp(widget codegen.WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists {
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("widget prop %s must be a string: %s", propName, widget.ID)
+		}
+	}
+	return nil
+}
+
+func validateBoolWidgetProp(widget codegen.WidgetNode, propName string) error {
+	if value, exists := widget.Props[propName]; exists {
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("widget prop %s must be a boolean: %s", propName, widget.ID)
+		}
+	}
+	return nil
+}
+
+func validateDropdownSelectedWidgetProp(widget codegen.WidgetNode) error {
+	selected, hasSelected := intWidgetProp(widget.Props, "selected")
+	if !hasSelected || selected < 0 {
+		return nil
+	}
+	options := dropdownWidgetOptions(widget.Props["options"])
+	if len(options) > 0 && selected >= len(options) {
+		return fmt.Errorf("widget prop selected must reference an available option: %s", widget.ID)
+	}
+	return nil
+}
+
+func dropdownWidgetOptions(raw any) []string {
+	options, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	lines := strings.Split(strings.ReplaceAll(options, "\r\n", "\n"), "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func validateRangeWidgetProps(widget codegen.WidgetNode) error {
+	min, hasMin := intWidgetProp(widget.Props, "min")
+	max, hasMax := intWidgetProp(widget.Props, "max")
+	if hasMin && hasMax && max <= min {
+		return fmt.Errorf("widget prop max must be greater than min: %s", widget.ID)
+	}
+	return nil
+}
+
+func validateRangeValueWidgetProp(widget codegen.WidgetNode) error {
+	value, hasValue := intWidgetProp(widget.Props, "value")
+	if !hasValue {
+		return nil
+	}
+	min := intWidgetPropOrDefault(widget.Props, "min", 0)
+	max := intWidgetPropOrDefault(widget.Props, "max", 100)
+	if max > min && (value < min || value > max) {
+		return fmt.Errorf("widget prop value must be between min and max: %s", widget.ID)
 	}
 	return nil
 }
@@ -1027,6 +1632,9 @@ func validateChartValuesWidgetProp(widget codegen.WidgetNode) error {
 		if !isFiniteWidgetNumber(value) {
 			return fmt.Errorf("widget prop values must contain only finite numbers: %s", widget.ID)
 		}
+		if !isIntegerWidgetNumber(value) {
+			return fmt.Errorf("widget prop values must contain only integers: %s", widget.ID)
+		}
 	}
 	return nil
 }
@@ -1042,6 +1650,26 @@ func isFiniteWidgetNumber(value any) bool {
 	default:
 		return false
 	}
+}
+
+func isIntegerWidgetNumber(value any) bool {
+	switch typed := value.(type) {
+	case int, int32, int64:
+		return true
+	case float32:
+		return !math.IsNaN(float64(typed)) && !math.IsInf(float64(typed), 0) && math.Trunc(float64(typed)) == float64(typed)
+	case float64:
+		return !math.IsNaN(typed) && !math.IsInf(typed, 0) && math.Trunc(typed) == typed
+	default:
+		return false
+	}
+}
+
+func intWidgetPropOrDefault(props map[string]any, name string, fallback int) int {
+	if value, ok := intWidgetProp(props, name); ok {
+		return value
+	}
+	return fallback
 }
 
 func validatePositiveWidgetProp(widget codegen.WidgetNode, propName string) error {
@@ -1081,7 +1709,7 @@ func intWidgetProp(props map[string]any, propName string) (int, bool) {
 	}
 }
 
-func validateWidgetLayout(widgetID string, layout codegen.LayoutBox) error {
+func validateWidgetLayout(widgetID string, widgetType string, layout codegen.LayoutBox) error {
 	if layout.Width <= 0 {
 		return fmt.Errorf("widget width must be greater than 0: %s", widgetID)
 	}
@@ -1094,6 +1722,9 @@ func validateWidgetLayout(widgetID string, layout codegen.LayoutBox) error {
 		}
 	}
 	if layout.Flex != nil {
+		if widgetType != "screen" && widgetType != "container" {
+			return fmt.Errorf("widget flex layout is only supported on screen and container widgets: %s", widgetID)
+		}
 		if _, ok := supportedFlexDirections[layout.Flex.Direction]; !ok {
 			return fmt.Errorf("unsupported flex direction: %s", layout.Flex.Direction)
 		}
@@ -1108,8 +1739,28 @@ func validateWidgetStyle(widgetID string, style codegen.WidgetStyle) error {
 	if style.Radius < 0 {
 		return fmt.Errorf("style radius must be non-negative: %s", widgetID)
 	}
+	if style.LetterSpace < 0 {
+		return fmt.Errorf("style letterSpace must be non-negative: %s", widgetID)
+	}
+	if style.LineSpace < 0 {
+		return fmt.Errorf("style lineSpace must be non-negative: %s", widgetID)
+	}
 	if style.Opacity != nil && (*style.Opacity < 0 || *style.Opacity > 100) {
 		return fmt.Errorf("style opacity must be between 0 and 100: %s", widgetID)
+	}
+	if style.BlendMode != "" {
+		if _, ok := supportedBlendModeValues[style.BlendMode]; !ok {
+			return fmt.Errorf("unsupported blend mode: %s", style.BlendMode)
+		}
+	}
+	if err := validateWidgetStyleColor(widgetID, "bgColor", style.BgColor); err != nil {
+		return err
+	}
+	if err := validateWidgetStyleColor(widgetID, "textColor", style.TextColor); err != nil {
+		return err
+	}
+	if err := validateWidgetStyleColor(widgetID, "borderColor", style.BorderColor); err != nil {
+		return err
 	}
 	if style.Padding.Top < 0 || style.Padding.Right < 0 || style.Padding.Bottom < 0 || style.Padding.Left < 0 {
 		return fmt.Errorf("style padding must be non-negative: %s", widgetID)
@@ -1120,6 +1771,29 @@ func validateWidgetStyle(widgetID string, style codegen.WidgetStyle) error {
 		}
 	}
 	return nil
+}
+
+func validateWidgetStyleColor(widgetID string, fieldName string, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if !isWidgetStyleHexColor(value) {
+		return fmt.Errorf("style %s must be a 3 or 6 digit hex color: %s", fieldName, widgetID)
+	}
+	return nil
+}
+
+func isWidgetStyleHexColor(value string) bool {
+	cleaned := strings.TrimPrefix(strings.TrimSpace(value), "#")
+	if len(cleaned) != 3 && len(cleaned) != 6 {
+		return false
+	}
+	for _, char := range cleaned {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 var supportedAlignValues = map[string]struct{}{
@@ -1139,6 +1813,14 @@ var supportedTextAlignValues = map[string]struct{}{
 	"left":   {},
 	"center": {},
 	"right":  {},
+}
+
+var supportedBlendModeValues = map[string]struct{}{
+	"normal":      {},
+	"additive":    {},
+	"subtractive": {},
+	"multiply":    {},
+	"replace":     {},
 }
 
 func sameParentID(got *string, want *string) bool {

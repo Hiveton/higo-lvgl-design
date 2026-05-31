@@ -102,6 +102,7 @@ select {
 .editor-shell.theme-light .code-stage-status,
 .editor-shell.theme-light .tabs,
 .editor-shell.theme-light .settings-card,
+.editor-shell.theme-light .project-style-editor,
 .editor-shell.theme-light .toolbar-project-menu,
 .editor-shell.theme-light .desktop-menu-popover {
   background: #ffffff;
@@ -1717,6 +1718,10 @@ select {
   margin-bottom: 18px;
 }
 
+.settings-card-header.compact {
+  margin-bottom: 10px;
+}
+
 .settings-card h2 {
   margin: 0;
   font-size: 15px;
@@ -1762,6 +1767,35 @@ select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.project-styles-section {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.project-styles-empty {
+  margin: 0;
+  color: #8d9ba6;
+  font-size: 12px;
+}
+
+.project-style-editor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: #0e1419;
+  padding: 12px;
+}
+
+.project-style-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-summary {

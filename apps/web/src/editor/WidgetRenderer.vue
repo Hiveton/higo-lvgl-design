@@ -108,6 +108,10 @@ const arcStyle = computed(() => ({
   background: `conic-gradient(#2f9bff 0deg ${Math.round(valuePercent.value * 3.6)}deg, rgba(255, 255, 255, 0.12) ${Math.round(valuePercent.value * 3.6)}deg 360deg)`
 }));
 const selectedDropdownOption = computed(() => {
+  const text = propText("text", "");
+  if (text) {
+    return text;
+  }
   const options = propText("options", copy.value.previewRuntime.dropdownDefaultOptions).split(/\r?\n/).filter(Boolean);
   return options[propNumber("selected", 0)] ?? options[0] ?? copy.value.previewRuntime.dropdownFallback;
 });

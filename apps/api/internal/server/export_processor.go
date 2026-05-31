@@ -40,6 +40,10 @@ func (processor *ExportJobProcessor) Run(ctx context.Context, ownerID string, jo
 		Logs:     job.Logs,
 	})
 
+	if err := validateProjectDoc(project.Doc, project.ID); err != nil {
+		processor.updateFailure(ctx, ownerID, job, "INVALID_PROJECT_DOC", err.Error())
+		return err
+	}
 	doc, err := mapToCodegenProject(project.Doc)
 	if err != nil {
 		processor.updateFailure(ctx, ownerID, job, "INVALID_PROJECT_DOC", err.Error())

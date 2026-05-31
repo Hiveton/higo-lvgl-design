@@ -66,7 +66,7 @@ Widgets palette：
 
 - 搜索框：`Search widgets...`
 - 分类：`Basic`、`Containers`、`Charts`、`Indicators`、`Inputs`、`Advanced`
-- 基础控件卡片：Button、Label、Image、Arc、Bar、Line、Switch、Slider、Checkbox、Dropdown、Spinner、QR Code
+- 控件卡片：Button、Label、Image、Container、Chart、Arc、Bar、Spinner、Switch、Slider、Checkbox、Dropdown、Line
 
 Layers tree：
 

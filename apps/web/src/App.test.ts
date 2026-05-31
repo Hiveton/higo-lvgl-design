@@ -46,6 +46,16 @@ function restoredProjectDoc() {
   };
 }
 
+function restoredProjectResponse() {
+  return {
+    id: "project-restored",
+    name: "Restored UI",
+    doc: restoredProjectDoc(),
+    createdAt: "2026-05-08T00:00:00Z",
+    updatedAt: "2026-05-08T00:00:00Z"
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -57,7 +67,7 @@ describe("App", () => {
         return Promise.resolve(new Response(JSON.stringify({ id: "user-1", email: "demo@hiveton.dev", displayName: "Hiveton Demo" }), { status: 200 }));
       }
       if (url === "/api/projects/project-restored") {
-        return Promise.resolve(new Response(JSON.stringify({ project: { id: "project-restored", name: "Restored UI", doc: restoredProjectDoc() } }), { status: 200 }));
+        return Promise.resolve(new Response(JSON.stringify({ project: restoredProjectResponse() }), { status: 200 }));
       }
       if (url === "/api/projects/project-restored/assets") {
         return Promise.resolve(new Response(JSON.stringify({ assets: restoredProjectDoc().assets }), { status: 200 }));

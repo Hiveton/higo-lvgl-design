@@ -67,6 +67,7 @@ export type EditorCopy = {
     resize: string;
     resources: string;
     sections: string;
+    timeline: string;
     timelineColumns: {
       item: string;
       kind: string;
@@ -94,9 +95,13 @@ export type EditorCopy = {
     newProjectTitle: string;
   };
   canvas: {
+    addReusableStyle: string;
     addScreen: string;
+    apply: string;
+    applyReusableStyle: (styleName: string, widgetName?: string) => string;
     backToCanvas: (screenName: string) => string;
     backToCanvasButton: string;
+    background: string;
     canvas: string;
     canvasZoom: string;
     code: string;
@@ -105,6 +110,7 @@ export type EditorCopy = {
     copyCode: (fileName: string) => string;
     currentScreen: string;
     dark: string;
+    deleteReusableStyle: (styleName: string) => string;
     device: string;
     fitView: (screenName: string) => string;
     fullscreen: (screenName: string) => string;
@@ -118,11 +124,18 @@ export type EditorCopy = {
     projectName: string;
     projectNameA11y: string;
     projectSettings: string;
+    radius: string;
+    reusableStyleName: string;
+    reusableStyles: string;
+    noReusableStyles: string;
+    opacity: string;
     save: string;
     screenFallback: string;
     settings: string;
+    styleName: string;
     target: string;
     targetSummary: (target: { colorDepth: number; deviceName: string; dpi: number; height: number; lvglVersion: string; width: number }) => string;
+    textColor: string;
     theme: string;
     width: string;
   };
@@ -176,6 +189,7 @@ export type EditorCopy = {
     assetUploadSaveFailed: string;
     assetImportedLocally: (name: string) => string;
     assetUploaded: (name: string) => string;
+    buildDirtyAfterSave: string;
     buildFailed: string;
     buildSaveFailed: string;
     buildSignInRequired: string;
@@ -201,6 +215,8 @@ export type EditorCopy = {
     loggedInAs: (name: string) => string;
     loginFailed: (message: string) => string;
     noCodeToCopy: string;
+    codegenBlockedInvalidAssetKind: (assetId: string) => string;
+    codegenBlockedInvalidFontAssetKind: (assetId: string) => string;
     codegenBlockedMissingAsset: (assetId: string) => string;
     codegenBlockedMissingFontAsset: (assetId: string) => string;
     previewFailed: string;
@@ -250,6 +266,7 @@ export type EditorCopy = {
       eventTarget: string;
       eventType: string;
       backgroundColor: string;
+      blendMode: string;
       borderColor: string;
       chartPointCount: string;
       chartValues: string;
@@ -300,6 +317,7 @@ export type EditorCopy = {
     emptyTitle: string;
     enterHandler: (eventName: string, targetName: string) => string;
     eventEmpty: string;
+    fontAssetWarning: (font: string) => string;
     fontAssetExportNote: string;
     imageAssetMissing: string;
     imageAssetNone: string;
@@ -329,6 +347,9 @@ export type EditorCopy = {
       chartValuesRequired: string;
       deviceNameRequired: string;
       greaterThanZero: (field: string) => string;
+      greaterThan: (field: string, comparison: string) => string;
+      hexColor: (field: string) => string;
+      integer: (field: string) => string;
       nonNegative: (field: string) => string;
       number: (field: string) => string;
       range: (field: string, min: number, max: number) => string;
@@ -337,6 +358,7 @@ export type EditorCopy = {
       align: string;
       arcLength: string;
       background: string;
+      blendMode: string;
       border: string;
       checked: string;
       colorDepth: string;
@@ -372,6 +394,7 @@ export type EditorCopy = {
       wrap: string;
     };
     options: {
+      blendMode: Record<"additive" | "multiply" | "normal" | "replace" | "subtractive", string>;
       flexDirection: Record<"column" | "row", string>;
       layoutAlign: Record<"bottom-left" | "bottom-right" | "center" | "top-left" | "top-right", string>;
       textAlign: Record<"center" | "left" | "right", string>;
@@ -607,6 +630,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       resize: "Resize bottom dock",
       resources: "Resources",
       sections: "Bottom dock sections",
+      timeline: "Timeline",
       timelineColumns: {
         item: "Item",
         kind: "Kind",
@@ -633,7 +657,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
     dialogs: {
       assetDeleteCancel: (name) => name ? `Cancel deleting ${name} asset` : "Cancel deleting asset",
       assetDeleteConfirm: (name) => name ? `Delete ${name} asset` : "Delete asset",
-      assetDeleteDescription: (name, usageCount) => `${name} is used by ${usageCount} image widget${usageCount === 1 ? "" : "s"}. Deleting it will clear those image references.`,
+      assetDeleteDescription: (name, usageCount) => `${name} is used by ${usageCount} resource reference${usageCount === 1 ? "" : "s"}. Deleting it will clear those resource references.`,
       assetDeleteTitle: "Delete referenced asset?",
       cancel: "Cancel",
       cancelNewProject: "Cancel creating cloud project",
@@ -645,9 +669,13 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       newProjectTitle: "Create cloud project"
     },
     canvas: {
+      addReusableStyle: "Add reusable style",
       addScreen: "Add screen from canvas toolbar",
+      apply: "Apply",
+      applyReusableStyle: (styleName, widgetName) => widgetName ? `Apply ${styleName} to ${widgetName}` : `Select a widget to apply ${styleName}`,
       backToCanvas: (screenName) => `Back to ${screenName} canvas`,
       backToCanvasButton: "Back to Canvas",
+      background: "Background",
       canvas: "Canvas",
       canvasZoom: "Canvas zoom",
       code: "Code",
@@ -656,6 +684,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       copyCode: (fileName) => `Copy generated code for ${fileName}`,
       currentScreen: "current screen",
       dark: "Dark",
+      deleteReusableStyle: (styleName) => `Delete ${styleName} reusable style`,
       device: "Device",
       fitView: (screenName) => `Fit ${screenName} canvas view`,
       fullscreen: (screenName) => `Open ${screenName} canvas fullscreen`,
@@ -669,11 +698,18 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       projectName: "Project Name",
       projectNameA11y: "Project name",
       projectSettings: "Project Settings",
+      radius: "Radius",
+      reusableStyleName: "Reusable style name",
+      reusableStyles: "Reusable Styles",
+      noReusableStyles: "No reusable styles yet.",
+      opacity: "Opacity",
       save: "Save",
       screenFallback: "Screen",
       settings: "Settings",
+      styleName: "Style Name",
       target: "Target",
       targetSummary: (target) => `${target.deviceName} / ${target.width} x ${target.height} · ${target.dpi} DPI · ${target.colorDepth}-bit · LVGL ${target.lvglVersion}`,
+      textColor: "Text Color",
       theme: "Theme",
       width: "Width"
     },
@@ -731,6 +767,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       assetUploadSaveFailed: "Asset upload stopped because project save failed",
       assetImportedLocally: (name) => `Asset imported locally: ${name}`,
       assetUploaded: (name) => `Asset uploaded: ${name}`,
+      buildDirtyAfterSave: "Build stopped because there are new unsaved changes",
       buildFailed: "Build failed",
       buildSaveFailed: "Build stopped because project save failed",
       buildSignInRequired: "Sign in before Build to create a cloud project and export C code",
@@ -756,6 +793,8 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       loggedInAs: (name) => `Logged in as ${name}`,
       loginFailed: (message) => `Login failed: ${message}`,
       noCodeToCopy: "No code to copy",
+      codegenBlockedInvalidAssetKind: (assetId) => `Code generation blocked: image widget must reference an image asset ${assetId}`,
+      codegenBlockedInvalidFontAssetKind: (assetId) => `Code generation blocked: font style must reference a font asset ${assetId}`,
       codegenBlockedMissingAsset: (assetId) => `Code generation blocked: missing image asset ${assetId}`,
       codegenBlockedMissingFontAsset: (assetId) => `Code generation blocked: missing font asset ${assetId}`,
       previewFailed: "Preview failed",
@@ -771,7 +810,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       projectCreated: "Project created",
       projectListFailed: "Project list failed",
       projectListLoaded: "Project list loaded",
-      projectNameRequired: "project name is required",
+      projectNameRequired: "Project name is required",
       projectOpened: "Project opened",
       projectOpenFailed: "Project open failed",
       projectSaved: "Project saved",
@@ -781,7 +820,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       runtimeLoadFailed: "Runtime load failed",
       selectImageWidgetBeforeBinding: "Select an unlocked image widget before binding an asset",
       signInBeforeAssets: "Sign in before uploading assets",
-      signInBeforeAssetsError: "sign in before uploading assets",
+      signInBeforeAssetsError: "Sign in before uploading assets",
       signInBeforeCloudProjects: "Sign in before creating cloud projects",
       signInBeforeLoadingProjects: "Sign in before loading cloud projects",
       simulatorBackground: (background) => `Simulator background ${background}`,
@@ -794,7 +833,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       simulatorRefreshed: "Simulator refreshed",
       simulatorScreenshotReady: "Simulator screenshot ready",
       simulatorScreenshotUnavailable: "Simulator screenshot unavailable",
-      unknownError: "unknown error",
+      unknownError: "Unknown error",
       untitledProjectName: "Untitled LVGL UI"
     },
     inspector: {
@@ -805,6 +844,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         eventTarget: "Event target",
         eventType: "Event type",
         backgroundColor: "Background color",
+        blendMode: "Blend mode",
         borderColor: "Border color",
         chartPointCount: "Chart point count",
         chartValues: "Chart values",
@@ -855,6 +895,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       emptyTitle: "No widget selected",
       enterHandler: (eventName, targetName) => `Enter handler to add ${eventName} event to ${targetName}`,
       eventEmpty: "No events bound to this selection.",
+      fontAssetWarning: (font) => `Unknown font asset or unsupported LVGL font symbol: ${font}`,
       fontAssetExportNote: "Uploaded font files are stored as metadata only in V1. Use a built-in lv_font_* symbol or convert the font before exporting C code.",
       imageAssetMissing: "Selected image asset is missing from this project.",
       imageAssetNone: "No image asset selected.",
@@ -884,6 +925,9 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         chartValuesRequired: "Values must contain at least one number",
         deviceNameRequired: "Device name is required",
         greaterThanZero: (field) => `${field} must be greater than 0`,
+        greaterThan: (field, comparison) => `${field} must be greater than ${comparison}`,
+        hexColor: (field) => `${field} must be a 3 or 6 digit hex color`,
+        integer: (field) => `${field} must be an integer`,
         nonNegative: (field) => `${field} must be non-negative`,
         number: (field) => `${field} must be a number`,
         range: (field, min, max) => `${field} must be between ${min} and ${max}`
@@ -892,6 +936,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         align: "Align",
         arcLength: "Arc Length",
         background: "Background",
+        blendMode: "Blend Mode",
         border: "Border",
         checked: "Checked",
         colorDepth: "Color Depth",
@@ -927,6 +972,13 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         wrap: "Wrap"
       },
       options: {
+        blendMode: {
+          additive: "Additive",
+          multiply: "Multiply",
+          normal: "Normal",
+          replace: "Replace",
+          subtractive: "Subtractive"
+        },
         flexDirection: {
           column: "Column",
           row: "Row"
@@ -1041,10 +1093,10 @@ export const editorCopy: Record<Locale, EditorCopy> = {
     toolbar: {
       applicationMenus: "Application menus",
       build: "Build",
-      buildCExport: "Build C Export",
+      buildCExport: "Build C export",
       buildCExportSignedOut: "Login to Build",
       building: "Building...",
-      cloudProjectCount: (count) => `${count} cloud`,
+      cloudProjectCount: (count) => `${count} cloud ${count === 1 ? "project" : "projects"}`,
       copy: "Copy",
       copySelectedWidget: "Copy selected widget",
       copyWidget: (name) => `Copy ${name} widget`,
@@ -1054,18 +1106,18 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       deleteSelectedWidget: "Delete selected widget",
       deleteWidget: (name) => `Delete ${name} widget`,
       demo: "Demo",
-      demoAccountConnected: "Demo Account Connected",
-      demoLogin: "Demo Login",
+      demoAccountConnected: "Demo account connected",
+      demoLogin: "Demo login",
       edit: "Edit",
       editorLanguage: "Editor language",
       email: "Email",
       emailForCloudLogin: "Email for cloud login",
       export: "Export",
       file: "File",
-      gridDisabled: "Grid Disabled",
-      gridEnabled: "Grid Enabled",
-      gridHide: "Hide Grid",
-      gridShow: "Show Grid",
+      gridDisabled: "Grid disabled",
+      gridEnabled: "Grid enabled",
+      gridHide: "Hide grid",
+      gridShow: "Show grid",
       help: "Help",
       hideSimulator: "Hide simulator",
       language: "Language",
@@ -1097,7 +1149,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       pasteCopiedWidget: "Paste copied widget",
       pasteWidget: (name) => `Paste ${name} widget`,
       preview: "Preview",
-      previewBeforeExport: "Preview Before Export",
+      previewBeforeExport: "Preview before export",
       previewCurrentScreen: "Preview current screen",
       project: "Project",
       projectMenuOpen: "Project menu open",
@@ -1106,18 +1158,18 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       refreshCloudProjects: "Refresh cloud projects",
       redo: "Redo",
       saveProject: (name) => `Save ${name} project`,
-      saveProjectMenu: "Save Project",
+      saveProjectMenu: "Save project",
       save: "Save",
       signInToBuild: "Sign in to build and export LVGL C code",
       showSimulator: "Show simulator",
       simulator: "Simulator",
-      simulatorShow: "Show Sim",
-      snapDisable: "Disable Snap",
-      snapDisabled: "Snap Disabled",
-      snapEnabled: "Snap Enabled",
-      snapEnable: "Enable Snap",
+      simulatorShow: "Show simulator",
+      snapDisable: "Disable snap",
+      snapDisabled: "Snap disabled",
+      snapEnabled: "Snap enabled",
+      snapEnable: "Enable snap",
       target: "Target",
-      targetSettings: "Target Settings",
+      targetSettings: "Target settings",
       theme: "Theme",
       tools: "Tools",
       undo: "Undo",
@@ -1197,6 +1249,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       resize: "调整底部面板高度",
       resources: "资源",
       sections: "底部面板分区",
+      timeline: "时间线",
       timelineColumns: {
         item: "项目",
         kind: "类型",
@@ -1223,7 +1276,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
     dialogs: {
       assetDeleteCancel: (name) => name ? `取消删除 ${name} 资源` : "取消删除资源",
       assetDeleteConfirm: (name) => name ? `删除 ${name} 资源` : "删除资源",
-      assetDeleteDescription: (name, usageCount) => `${name} 正被 ${usageCount} 个图片控件使用。删除后这些图片引用会被清空。`,
+      assetDeleteDescription: (name, usageCount) => `${name} 正被 ${usageCount} 个资源引用使用。删除后这些资源引用会被清空。`,
       assetDeleteTitle: "删除已引用资源？",
       cancel: "取消",
       cancelNewProject: "取消创建云项目",
@@ -1235,9 +1288,13 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       newProjectTitle: "创建云项目"
     },
     canvas: {
+      addReusableStyle: "新增可复用样式",
       addScreen: "从画布工具栏新增屏幕",
+      apply: "应用",
+      applyReusableStyle: (styleName, widgetName) => widgetName ? `将 ${styleName} 应用到 ${widgetName}` : `选择控件以应用 ${styleName}`,
       backToCanvas: (screenName) => `返回 ${screenName} 画布`,
       backToCanvasButton: "返回画布",
+      background: "背景",
       canvas: "画布",
       canvasZoom: "画布缩放",
       code: "代码",
@@ -1246,6 +1303,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       copyCode: (fileName) => `复制 ${fileName} 的生成代码`,
       currentScreen: "当前屏幕",
       dark: "深色",
+      deleteReusableStyle: (styleName) => `删除 ${styleName} 可复用样式`,
       device: "设备",
       fitView: (screenName) => `适配 ${screenName} 画布视图`,
       fullscreen: (screenName) => `全屏打开 ${screenName} 画布`,
@@ -1259,11 +1317,18 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       projectName: "项目名称",
       projectNameA11y: "项目名称",
       projectSettings: "项目设置",
+      radius: "圆角",
+      reusableStyleName: "可复用样式名称",
+      reusableStyles: "可复用样式",
+      noReusableStyles: "暂无可复用样式。",
+      opacity: "透明度",
       save: "保存",
       screenFallback: "屏幕",
       settings: "设置",
+      styleName: "样式名称",
       target: "目标",
       targetSummary: (target) => `${target.deviceName} / ${target.width} x ${target.height} · ${target.dpi} DPI · ${target.colorDepth} 位 · LVGL ${target.lvglVersion}`,
+      textColor: "文字颜色",
       theme: "主题",
       width: "宽度"
     },
@@ -1321,6 +1386,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       assetUploadSaveFailed: "项目保存失败，资源上传已停止",
       assetImportedLocally: (name) => `资源已本地导入：${name}`,
       assetUploaded: (name) => `资源已上传：${name}`,
+      buildDirtyAfterSave: "检测到新的未保存更改，构建已停止",
       buildFailed: "构建失败",
       buildSaveFailed: "项目保存失败，构建已停止",
       buildSignInRequired: "请先登录并创建云项目，再构建导出 LVGL C 代码",
@@ -1346,6 +1412,8 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       loggedInAs: (name) => `已登录：${name}`,
       loginFailed: (message) => `登录失败：${message}`,
       noCodeToCopy: "没有可复制的代码",
+      codegenBlockedInvalidAssetKind: (assetId) => `代码生成已阻断：图片控件必须引用图片资源 ${assetId}`,
+      codegenBlockedInvalidFontAssetKind: (assetId) => `代码生成已阻断：字体样式必须引用字体资源 ${assetId}`,
       codegenBlockedMissingAsset: (assetId) => `代码生成已阻断：缺少图片资源 ${assetId}`,
       codegenBlockedMissingFontAsset: (assetId) => `代码生成已阻断：缺少字体资源 ${assetId}`,
       previewFailed: "预览失败",
@@ -1395,6 +1463,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         eventTarget: "事件目标",
         eventType: "事件类型",
         backgroundColor: "背景颜色",
+        blendMode: "混合模式",
         borderColor: "边框颜色",
         chartPointCount: "图表点数量",
         chartValues: "图表数值",
@@ -1445,6 +1514,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
       emptyTitle: "未选择控件",
       enterHandler: (eventName, targetName) => `输入处理函数后为 ${targetName} 添加 ${eventName} 事件`,
       eventEmpty: "当前选择没有绑定事件。",
+      fontAssetWarning: (font) => `未知字体资源或不支持的 LVGL 字体符号：${font}`,
       fontAssetExportNote: "V1 中上传字体仅作为元数据保存。导出 C 代码前请使用内置 lv_font_* 符号，或先将字体转换为 LVGL 字体符号。",
       imageAssetMissing: "已选图片资源不在当前项目中。",
       imageAssetNone: "未选择图片资源。",
@@ -1474,6 +1544,9 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         chartValuesRequired: "至少需要输入一个数值",
         deviceNameRequired: "设备名称不能为空",
         greaterThanZero: (field) => `${field}必须大于 0`,
+        greaterThan: (field, comparison) => `${field}必须大于${comparison}`,
+        hexColor: (field) => `${field}必须是 3 位或 6 位十六进制颜色`,
+        integer: (field) => `${field}必须是整数`,
         nonNegative: (field) => `${field}不能为负数`,
         number: (field) => `${field}必须是数字`,
         range: (field, min, max) => `${field}必须在 ${min} 到 ${max} 之间`
@@ -1482,6 +1555,7 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         align: "对齐",
         arcLength: "弧长",
         background: "背景",
+        blendMode: "混合模式",
         border: "边框",
         checked: "选中",
         colorDepth: "色深",
@@ -1517,6 +1591,13 @@ export const editorCopy: Record<Locale, EditorCopy> = {
         wrap: "换行"
       },
       options: {
+        blendMode: {
+          additive: "叠加",
+          multiply: "正片叠底",
+          normal: "正常",
+          replace: "替换",
+          subtractive: "减去"
+        },
         flexDirection: {
           column: "纵向",
           row: "横向"
@@ -1778,6 +1859,7 @@ function timelineCommandLabel(label: string, locale: Locale): string {
     "Reorder widget": "调整控件层级",
     "Resize widget": "调整控件尺寸",
     "Unregister asset": "注销资源",
+    "Update project styles": "更新项目样式",
     "Update target": "更新目标",
     "Update theme": "更新主题",
     "Update widget layout": "更新控件布局",
@@ -1808,6 +1890,7 @@ function timelineCommandMessageLabel(message: EditorCommandMessage, locale: Loca
       renameScreen: "Rename screen",
       reorderWidget: "Reorder widget",
       resizeWidget: "Resize widget",
+      updateProjectStyles: "Update project styles",
       updateTarget: "Update target",
       updateTheme: "Update theme",
       updateWidgetLayout: "Update widget layout",
@@ -1830,6 +1913,7 @@ function timelineCommandMessageLabel(message: EditorCommandMessage, locale: Loca
       renameScreen: "重命名屏幕",
       reorderWidget: "调整控件层级",
       resizeWidget: "调整控件尺寸",
+      updateProjectStyles: "更新项目样式",
       updateTarget: "更新目标",
       updateTheme: "更新主题",
       updateWidgetLayout: "更新控件布局",

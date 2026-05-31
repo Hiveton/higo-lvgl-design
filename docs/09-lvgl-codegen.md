@@ -61,7 +61,7 @@ README.md
 - 声明和定义 image/font 资源引用。
 - 第一版 image 从对象存储读取原始上传字节，生成 `const uint8_t *_data[]` 和 `const lv_img_dsc_t`。
 - `assets.h` 使用 `LV_IMG_DECLARE(ui_img_xxx)` 暴露符号，`ui.c` 通过 `lv_img_set_src(obj, &ui_img_xxx)` 引用。
-- 当前生成格式使用 `LV_IMG_CF_RAW`，适合先保证导出包自包含和可编译；目标工程如需硬件最优格式，可以在后续资源优化阶段替换为 LVGL 官方图片转换格式。
+- PNG/JPEG 资源会解码为 `LV_IMG_CF_TRUE_COLOR_ALPHA` 像素数据；若已有资源内容无法解码，codegen 会保留原始字节并使用 `LV_IMG_CF_RAW` 作为兜底。
 - font asset 第一版只作为 ProjectDoc 元数据保留；当 `style.font` 引用 font asset id 时，`ui.c` 写入注释提醒将字体转换为 LVGL font symbol，不生成不存在的 `&font_id` 绑定。
 - 当 `style.font` 引用不存在的自定义 font asset id 时，codegen 必须返回错误，不生成带悬空资源引用的导出包。
 
@@ -117,7 +117,7 @@ switch    -> lv_switch_create(parent)
 slider    -> lv_slider_create(parent)
 checkbox  -> lv_checkbox_create(parent)
 dropdown  -> lv_dropdown_create(parent)
-spinner   -> lv_spinner_create(parent)
+spinner   -> lv_spinner_create(parent, spinTime, arcLength)
 chart     -> lv_chart_create(parent)
 ```
 
@@ -265,6 +265,8 @@ Codegen 遇到以下情况应返回明确错误：
 - unsupported widget type。
 - event 绑定指向不存在 widget。
 - image widget 引用不存在 asset。
+- image/font asset 的 MIME 类型不在支持列表内。
+- image asset 缺少导出所需的 `Data`，或无法解码且没有提供 `width`/`height`。
 
 ## 验收标准
 

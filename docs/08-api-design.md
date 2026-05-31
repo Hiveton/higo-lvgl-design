@@ -81,14 +81,8 @@
     {
       "id": "project-id",
       "name": "My Watch UI",
-      "target": {
-        "lvglVersion": "8.3",
-        "deviceName": "ESP32-S3",
-        "width": 480,
-        "height": 480,
-        "dpi": 240,
-        "colorDepth": 16
-      },
+      "doc": {},
+      "createdAt": "2026-05-08T00:00:00Z",
       "updatedAt": "2026-05-08T00:00:00Z"
     }
   ]
@@ -120,7 +114,9 @@
   "project": {
     "id": "project-id",
     "name": "My Watch UI",
-    "doc": {}
+    "doc": {},
+    "createdAt": "2026-05-08T00:00:00Z",
+    "updatedAt": "2026-05-08T00:00:00Z"
   }
 }
 ```
@@ -189,6 +185,24 @@
     "id": "version-id",
     "projectId": "project-id",
     "name": "Before Build 2026-05-08 13:45",
+    "label": "Before Build 2026-05-08 13:45",
+    "doc": {
+      "schemaVersion": 1,
+      "id": "project-id",
+      "target": {
+        "lvglVersion": "8.3",
+        "deviceName": "ESP32-S3",
+        "width": 480,
+        "height": 480,
+        "dpi": 240,
+        "colorDepth": 16
+      },
+      "pages": [],
+      "assets": [],
+      "theme": {
+        "styles": []
+      }
+    },
     "createdAt": "2026-05-08T00:00:00Z"
   }
 }
@@ -228,7 +242,7 @@ kind=image | font
 
 - 第一版接受 `image/png`、`image/jpeg`、`.ttf`、`.otf`、`.woff`、`.woff2`。
 - font asset 返回 `kind:"font"`，不返回 width/height。
-- 单文件建议限制 `5MB`。
+- 单文件大小上限为 `5MB`，超过时返回 `ASSET_TOO_LARGE`。
 - `objectKey` 必须由服务端生成且全局唯一；同一 project 内多次上传同名文件必须返回不同 `objectKey`，并保留各自对象内容。
 
 ### GET /api/projects/:projectId/assets
@@ -255,6 +269,8 @@ Content-Disposition: inline; filename="icon_heart.png"
 <binary>
 ```
 
+`Content-Type` 使用资源原始 MIME；支持 `image/png`、`image/jpeg`、`font/ttf`、`font/otf`、`font/woff`、`font/woff2`。
+
 权限：
 
 - 必须登录。
@@ -277,7 +293,7 @@ Content-Disposition: inline; filename="icon_heart.png"
 {
   "error": {
     "code": "ASSET_IN_USE",
-    "message": "asset is used by image widget"
+    "message": "asset is still referenced by ProjectDoc"
   }
 }
 ```
@@ -306,7 +322,7 @@ Content-Disposition: inline; filename="icon_heart.png"
 
 - 校验 project owner。
 - 读取最新 `ProjectDoc`。
-- 如果 `createVersion` 为 true，创建版本快照。
+- 默认创建 `Build snapshot` 版本快照；如果请求体显式传入 `"createVersion": false`，则跳过快照。
 - 创建 C export job。
 
 ## Jobs
@@ -330,12 +346,29 @@ Content-Disposition: inline; filename="icon_heart.png"
       }
     ],
     "result": {
-      "downloadUrl": "https://storage.example.com/export.zip",
-      "expiresAt": "2026-05-08T01:00:00Z"
+      "downloadUrl": "/api/jobs/job-id/download"
     }
   }
 }
 ```
+
+约束：
+
+- `status:"succeeded"` 的 job 必须包含 `result.downloadUrl`。
+- `queued` 和 `running` job 不包含 `result` 或 `error`。
+- `failed` job 可包含结构化 `error`；日志可提供更详细的失败过程，缺少结构化错误时前端显示兜底失败信息。
+
+### GET /api/jobs/:jobId/download
+
+响应：
+
+- `200 application/zip`：返回导出的 LVGL C zip。
+
+行为：
+
+- 校验 job owner。
+- 仅 succeeded 且存在结果文件的 job 可下载。
+- 下载失败时返回结构化错误响应。
 
 失败响应中的 job：
 

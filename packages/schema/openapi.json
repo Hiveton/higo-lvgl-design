@@ -41,7 +41,13 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
           "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -95,7 +101,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["projects"],
+                  "required": [
+                    "projects"
+                  ],
                   "properties": {
                     "projects": {
                       "type": "array",
@@ -107,6 +115,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -135,6 +149,12 @@
           },
           "400": {
             "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -158,7 +178,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -178,7 +204,10 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["doc"],
+                "required": [
+                  "doc"
+                ],
+                "additionalProperties": false,
                 "properties": {
                   "doc": {
                     "$ref": "#/components/schemas/ProjectDoc"
@@ -195,13 +224,17 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["projectId", "updatedAt"],
+                  "required": [
+                    "projectId",
+                    "updatedAt"
+                  ],
                   "properties": {
                     "projectId": {
                       "type": "string"
                     },
                     "updatedAt": {
-                      "type": "string"
+                      "type": "string",
+                      "format": "date-time"
                     }
                   }
                 }
@@ -209,6 +242,15 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -228,6 +270,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string"
@@ -247,7 +290,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["version"],
+                  "required": [
+                    "version"
+                  ],
                   "properties": {
                     "version": {
                       "$ref": "#/components/schemas/ProjectVersion"
@@ -256,6 +301,18 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -275,7 +332,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["assets"],
+                  "required": [
+                    "assets"
+                  ],
                   "properties": {
                     "assets": {
                       "type": "array",
@@ -287,11 +346,20 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
         }
       },
       "post": {
-        "summary": "Upload a PNG or JPG asset",
+        "summary": "Upload an image or font asset",
         "parameters": [
           {
             "$ref": "#/components/parameters/ProjectId"
@@ -303,7 +371,11 @@
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": ["file"],
+                "required": [
+                  "file",
+                  "kind"
+                ],
+                "additionalProperties": false,
                 "properties": {
                   "file": {
                     "type": "string",
@@ -311,7 +383,10 @@
                   },
                   "kind": {
                     "type": "string",
-                    "enum": ["image"]
+                    "enum": [
+                      "image",
+                      "font"
+                    ]
                   }
                 }
               }
@@ -325,7 +400,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["asset"],
+                  "required": [
+                    "asset"
+                  ],
                   "properties": {
                     "asset": {
                       "$ref": "#/components/schemas/Asset"
@@ -336,6 +413,15 @@
             }
           },
           "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -367,10 +453,40 @@
                   "type": "string",
                   "format": "binary"
                 }
+              },
+              "font/ttf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "font/otf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "font/woff": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "font/woff2": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -394,7 +510,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["deleted"],
+                  "required": [
+                    "deleted"
+                  ],
                   "properties": {
                     "deleted": {
                       "type": "boolean"
@@ -404,7 +522,16 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -424,9 +551,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "createVersion": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "default": true
                   }
                 }
               }
@@ -440,7 +569,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["jobId"],
+                  "required": [
+                    "jobId"
+                  ],
                   "properties": {
                     "jobId": {
                       "type": "string"
@@ -449,6 +580,18 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -468,7 +611,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["job"],
+                  "required": [
+                    "job"
+                  ],
                   "properties": {
                     "job": {
                       "$ref": "#/components/schemas/Job"
@@ -478,7 +623,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -504,7 +655,13 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
             "$ref": "#/components/responses/Error"
           }
         }
@@ -560,7 +717,11 @@
     "schemas": {
       "LoginRequest": {
         "type": "object",
-        "required": ["email", "password"],
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false,
         "properties": {
           "email": {
             "type": "string",
@@ -573,7 +734,10 @@
       },
       "LoginResponse": {
         "type": "object",
-        "required": ["token", "user"],
+        "required": [
+          "token",
+          "user"
+        ],
         "properties": {
           "token": {
             "type": "string"
@@ -585,7 +749,11 @@
       },
       "User": {
         "type": "object",
-        "required": ["id", "email", "displayName"],
+        "required": [
+          "id",
+          "email",
+          "displayName"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -601,7 +769,10 @@
       },
       "HealthResponse": {
         "type": "object",
-        "required": ["ok", "service"],
+        "required": [
+          "ok",
+          "service"
+        ],
         "properties": {
           "ok": {
             "type": "boolean"
@@ -613,7 +784,10 @@
       },
       "CreateProjectRequest": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
         "properties": {
           "name": {
             "type": "string"
@@ -625,25 +799,13 @@
       },
       "ProjectSummary": {
         "type": "object",
-        "required": ["id", "name", "updatedAt"],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "target": {
-            "$ref": "#/components/schemas/TargetConfig"
-          },
-          "updatedAt": {
-            "type": "string"
-          }
-        }
-      },
-      "Project": {
-        "type": "object",
-        "required": ["id", "name", "doc"],
+        "required": [
+          "id",
+          "name",
+          "doc",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -655,16 +817,49 @@
             "$ref": "#/components/schemas/ProjectDoc"
           },
           "createdAt": {
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           },
           "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "doc",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
             "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "doc": {
+            "$ref": "#/components/schemas/ProjectDoc"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
       "ProjectResponse": {
         "type": "object",
-        "required": ["project"],
+        "required": [
+          "project"
+        ],
         "properties": {
           "project": {
             "$ref": "#/components/schemas/Project"
@@ -673,21 +868,35 @@
       },
       "ProjectVersion": {
         "type": "object",
-        "required": ["id", "projectId", "name", "createdAt"],
-        "properties": {
-          "id": {
-            "type": "string"
+        "required": [
+        "id",
+        "projectId",
+        "name",
+        "label",
+        "doc",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
           },
           "projectId": {
             "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "doc": {
+          "$ref": "#/components/schemas/ProjectDoc"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
         }
+      }
       },
       "TargetConfig": {
         "$ref": "./project-doc.schema.json#/$defs/TargetConfig"
@@ -700,17 +909,31 @@
       },
       "Job": {
         "type": "object",
-        "required": ["id", "status", "logs"],
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "progress",
+          "logs"
+        ],
         "properties": {
           "id": {
             "type": "string"
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "export_c"
+            ]
           },
           "status": {
             "type": "string",
-            "enum": ["queued", "running", "succeeded", "failed"]
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ]
           },
           "progress": {
             "type": "integer",
@@ -725,6 +948,9 @@
           },
           "result": {
             "type": "object",
+            "required": [
+              "downloadUrl"
+            ],
             "properties": {
               "downloadUrl": {
                 "type": "string"
@@ -733,19 +959,31 @@
           },
           "error": {
             "$ref": "#/components/schemas/ErrorBody"
+          },
+          "projectId": {
+            "type": "string"
           }
         }
       },
       "JobLogEntry": {
         "type": "object",
-        "required": ["time", "level", "message"],
+        "required": [
+          "time",
+          "level",
+          "message"
+        ],
         "properties": {
           "time": {
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           },
           "level": {
             "type": "string",
-            "enum": ["info", "warn", "error"]
+            "enum": [
+              "info",
+              "warn",
+              "error"
+            ]
           },
           "message": {
             "type": "string"
@@ -754,10 +992,45 @@
       },
       "ErrorBody": {
         "type": "object",
-        "required": ["code", "message"],
+        "required": [
+          "code",
+          "message"
+        ],
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "ASSET_CONTENT_NOT_FOUND",
+              "ASSET_CREATE_FAILED",
+              "ASSET_FILE_REQUIRED",
+              "ASSET_IN_USE",
+              "ASSET_LIST_FAILED",
+              "ASSET_LOAD_FAILED",
+              "ASSET_NOT_FOUND",
+              "ASSET_READ_FAILED",
+              "ASSET_STORE_FAILED",
+              "ASSET_TOO_LARGE",
+              "CODEGEN_FAILED",
+              "INVALID_CREDENTIALS",
+              "INVALID_JSON",
+              "INVALID_LOGIN_REQUEST",
+              "INVALID_MULTIPART",
+              "INVALID_PROJECT_DOC",
+              "INVALID_PROJECT_NAME",
+              "JOB_CREATE_FAILED",
+              "JOB_NOT_FOUND",
+              "JOB_QUEUE_FAILED",
+              "JOB_RESULT_NOT_FOUND",
+              "OBJECT_STORE_FAILED",
+              "PROJECT_CREATE_FAILED",
+              "PROJECT_LIST_FAILED",
+              "PROJECT_NOT_FOUND",
+              "PROJECT_SAVE_FAILED",
+              "PROJECT_VERSION_CREATE_FAILED",
+              "TOKEN_ISSUE_FAILED",
+              "UNAUTHENTICATED",
+              "UNSUPPORTED_ASSET_TYPE"
+            ]
           },
           "message": {
             "type": "string"
@@ -766,7 +1039,9 @@
       },
       "ErrorResponse": {
         "type": "object",
-        "required": ["error"],
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "$ref": "#/components/schemas/ErrorBody"

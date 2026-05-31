@@ -24,23 +24,37 @@ export const useAssetsStore = defineStore("assets", () => {
   const localeStore = useLocaleStore();
   const assets = ref<AssetRef[]>([]);
   const previewUrls = ref<Record<string, string>>({});
+  const localFiles = ref<Record<string, File>>({});
   const loading = ref(false);
   const error = ref<string | null>(null);
+  let loadRequestId = 0;
+  let mutationRequestId = 0;
 
   async function loadAssets(projectId: string): Promise<void> {
+    const requestId = ++loadRequestId;
     loading.value = true;
     error.value = null;
     try {
-      assets.value = await listProjectAssets(projectId);
-      await hydratePreviewUrls(projectId, assets.value);
+      const nextAssets = await listProjectAssets(projectId);
+      if (requestId !== loadRequestId) {
+        return;
+      }
+      assets.value = nextAssets;
+      await hydratePreviewUrls(projectId, nextAssets, requestId);
     } catch (caught) {
+      if (requestId !== loadRequestId) {
+        return;
+      }
+      clearAssetState();
       error.value = localizeError(caught, localeStore.locale, "ASSET_LIST_FAILED");
     } finally {
-      loading.value = false;
+      if (requestId === loadRequestId) {
+        loading.value = false;
+      }
     }
   }
 
-  async function hydratePreviewUrls(projectId: string, nextAssets: AssetRef[]): Promise<void> {
+  async function hydratePreviewUrls(projectId: string, nextAssets: AssetRef[], requestId: number): Promise<void> {
     const nextPreviewUrls: Record<string, string> = {};
     for (const asset of nextAssets) {
       if (asset.kind !== "image" || previewUrls.value[asset.id]) {
@@ -51,22 +65,32 @@ export const useAssetsStore = defineStore("assets", () => {
       }
       try {
         const content = await getProjectAssetContent(projectId, asset.id);
-        if (typeof URL.createObjectURL === "function") {
-          nextPreviewUrls[asset.id] = URL.createObjectURL(content);
+        const previewUrl = createPreviewObjectUrl(content);
+        if (previewUrl) {
+          nextPreviewUrls[asset.id] = previewUrl;
         }
-      } catch {
-        // Metadata remains useful even when a preview object cannot be fetched.
+      } catch (error) {
+        console.warn("Failed to load image preview:", error);
       }
     }
+    if (requestId !== loadRequestId) {
+      for (const previewUrl of Object.values(nextPreviewUrls)) {
+        if (!Object.values(previewUrls.value).includes(previewUrl)) {
+          revokePreviewObjectUrl(previewUrl);
+        }
+      }
+      return;
+    }
     for (const [assetId, previewUrl] of Object.entries(previewUrls.value)) {
-      if (!nextPreviewUrls[assetId] && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(previewUrl);
+      if (!nextPreviewUrls[assetId]) {
+        revokePreviewObjectUrl(previewUrl);
       }
     }
     previewUrls.value = nextPreviewUrls;
   }
 
   async function uploadAsset(projectId: string, file: File): Promise<AssetRef | null> {
+    const requestId = ++mutationRequestId;
     loading.value = true;
     error.value = null;
     if (file.size > MAX_ASSET_BYTES) {
@@ -81,19 +105,28 @@ export const useAssetsStore = defineStore("assets", () => {
     }
     try {
       const asset = await uploadProjectAsset(projectId, file);
+      if (requestId !== mutationRequestId) {
+        return null;
+      }
+      invalidateAssetLoads();
       assets.value = [...assets.value, asset];
-      if (asset.kind === "image" && typeof URL.createObjectURL === "function") {
+      const previewUrl = asset.kind === "image" ? createPreviewObjectUrl(file) : null;
+      if (previewUrl) {
         previewUrls.value = {
           ...previewUrls.value,
-          [asset.id]: URL.createObjectURL(file)
+          [asset.id]: previewUrl
         };
       }
       return asset;
     } catch (caught) {
-      error.value = localizeError(caught, localeStore.locale, "ASSET_UPLOAD_FAILED");
+      if (requestId === mutationRequestId) {
+        error.value = localizeError(caught, localeStore.locale, "ASSET_UPLOAD_FAILED");
+      }
       return null;
     } finally {
-      loading.value = false;
+      if (requestId === mutationRequestId) {
+        loading.value = false;
+      }
     }
   }
 
@@ -118,35 +151,94 @@ export const useAssetsStore = defineStore("assets", () => {
       objectKey: `local://${file.name}`,
       createdAt: new Date().toISOString()
     };
+    invalidateAssetLoads();
+    localFiles.value = {
+      ...localFiles.value,
+      [asset.id]: file
+    };
     assets.value = [...assets.value, asset];
-    if (asset.kind === "image" && typeof URL.createObjectURL === "function") {
+    const previewUrl = asset.kind === "image" ? createPreviewObjectUrl(file) : null;
+    if (previewUrl) {
       previewUrls.value = {
         ...previewUrls.value,
-        [asset.id]: URL.createObjectURL(file)
+        [asset.id]: previewUrl
       };
     }
     return asset;
   }
 
+  async function uploadStoredLocalAsset(projectId: string, assetId: string): Promise<{ oldAssetId: string; asset: AssetRef } | null> {
+    const localAsset = assets.value.find((asset) => asset.id === assetId && asset.objectKey.startsWith("local://"));
+    const file = localFiles.value[assetId];
+    if (!localAsset || !file) {
+      error.value = localizedErrorForCode("ASSET_UPLOAD_FAILED", localeStore.locale);
+      return null;
+    }
+    const uploaded = await uploadAsset(projectId, file);
+    if (!uploaded) {
+      return null;
+    }
+    removeAssetFromState(assetId);
+    return {
+      oldAssetId: assetId,
+      asset: uploaded
+    };
+  }
+
   async function deleteAsset(projectId: string, assetId: string): Promise<boolean> {
+    const requestId = ++mutationRequestId;
     loading.value = true;
     error.value = null;
     try {
       await deleteProjectAsset(projectId, assetId);
-      assets.value = assets.value.filter((asset) => asset.id !== assetId);
-      const previewUrl = previewUrls.value[assetId];
-      if (previewUrl && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(previewUrl);
-      }
-      const { [assetId]: _removed, ...remainingPreviewUrls } = previewUrls.value;
-      previewUrls.value = remainingPreviewUrls;
+      invalidateAssetLoads();
+      removeAssetFromState(assetId);
       return true;
     } catch (caught) {
-      error.value = localizeError(caught, localeStore.locale, "ASSET_DELETE_FAILED");
+      if (requestId === mutationRequestId) {
+        error.value = localizeError(caught, localeStore.locale, "ASSET_DELETE_FAILED");
+      }
       return false;
     } finally {
-      loading.value = false;
+      if (requestId === mutationRequestId) {
+        loading.value = false;
+      }
     }
+  }
+
+  function deleteLocalAsset(assetId: string): boolean {
+    error.value = null;
+    if (!assets.value.some((asset) => asset.id === assetId)) {
+      return false;
+    }
+    invalidateAssetLoads();
+    removeAssetFromState(assetId);
+    return true;
+  }
+
+  function invalidateAssetLoads(): void {
+    loadRequestId += 1;
+  }
+
+  function removeAssetFromState(assetId: string): void {
+    assets.value = assets.value.filter((asset) => asset.id !== assetId);
+    const previewUrl = previewUrls.value[assetId];
+    if (previewUrl) {
+      revokePreviewObjectUrl(previewUrl);
+    }
+    const { [assetId]: _removed, ...remainingPreviewUrls } = previewUrls.value;
+    previewUrls.value = remainingPreviewUrls;
+    const { [assetId]: _removedFile, ...remainingLocalFiles } = localFiles.value;
+    localFiles.value = remainingLocalFiles;
+  }
+
+  function clearAssetState(): void {
+    for (const previewUrl of Object.values(previewUrls.value)) {
+      revokePreviewObjectUrl(previewUrl);
+    }
+    assets.value = [];
+    previewUrls.value = {};
+    localFiles.value = {};
   }
 
   function clearError(): void {
@@ -158,10 +250,13 @@ export const useAssetsStore = defineStore("assets", () => {
     previewUrls,
     loading,
     error,
+    localFiles,
     clearError,
     loadAssets,
     uploadAsset,
     importLocalAsset,
+    uploadStoredLocalAsset,
+    deleteLocalAsset,
     deleteAsset
   };
 });
@@ -175,6 +270,29 @@ function assetKindForFile(file: File): AssetRef["kind"] {
     return "font";
   }
   return "image";
+}
+
+function createPreviewObjectUrl(source: Blob): string | null {
+  if (typeof URL.createObjectURL !== "function") {
+    return null;
+  }
+  try {
+    return URL.createObjectURL(source);
+  } catch (error) {
+    console.warn("Failed to create preview object URL:", error);
+    return null;
+  }
+}
+
+function revokePreviewObjectUrl(previewUrl: string): void {
+  if (typeof URL.revokeObjectURL !== "function") {
+    return;
+  }
+  try {
+    URL.revokeObjectURL(previewUrl);
+  } catch (error) {
+    console.warn("Failed to revoke preview object URL:", error);
+  }
 }
 
 function createLocalAssetId(fileName: string): string {

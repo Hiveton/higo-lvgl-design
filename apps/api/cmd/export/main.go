@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hiveton/lvgl-online-editor/apps/api/internal/codegen"
 )
@@ -36,7 +38,9 @@ func run(args []string) error {
 	}
 
 	var doc codegen.ProjectDoc
-	if err := json.Unmarshal(docContent, &doc); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(docContent))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&doc); err != nil {
 		return fmt.Errorf("parse ProjectDoc JSON: %w", err)
 	}
 
@@ -89,6 +93,9 @@ func hydrateAssets(root string, assets []codegen.AssetRef) error {
 		if assets[index].Kind != "image" || assets[index].ObjectKey == "" {
 			continue
 		}
+		if !strings.HasPrefix(assets[index].ObjectKey, fmt.Sprintf("projects/%s/assets/", assets[index].ProjectID)) {
+			return fmt.Errorf("asset objectKey must be under project asset scope: %s", assets[index].ID)
+		}
 		path, err := assetPath(root, assets[index].ObjectKey)
 		if err != nil {
 			return err
@@ -103,6 +110,9 @@ func hydrateAssets(root string, assets []codegen.AssetRef) error {
 }
 
 func assetPath(root string, objectKey string) (string, error) {
+	if strings.HasPrefix(objectKey, "local://") {
+		return "", fmt.Errorf("local asset objectKey cannot be hydrated: %s", objectKey)
+	}
 	if filepath.IsAbs(objectKey) {
 		return "", fmt.Errorf("invalid absolute asset objectKey: %s", objectKey)
 	}

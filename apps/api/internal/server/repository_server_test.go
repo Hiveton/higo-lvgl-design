@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,39 @@ func TestRepositoryServerHealthEndpointDoesNotRequireAuth(t *testing.T) {
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte(`"ok":true`)) || !bytes.Contains(response.Body.Bytes(), []byte(`"service":"lvgl-online-editor-api"`)) {
 		t.Fatalf("unexpected health response: %s", response.Body.String())
+	}
+}
+
+func TestRepositoryServerLoginRejectsWrongPassword(t *testing.T) {
+	handler := NewRepositoryServer(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{
+		"email":"demo@hiveton.dev",
+		"password":"wrong-password"
+	}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("login status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"code":"INVALID_CREDENTIALS"`)) {
+		t.Fatalf("expected INVALID_CREDENTIALS error: %s", response.Body.String())
+	}
+}
+
+func TestRepositoryServerLoginRejectsMissingCredentials(t *testing.T) {
+	handler := NewRepositoryServer(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo())
+
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"password":"password"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("login status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`"code":"INVALID_LOGIN_REQUEST"`)) {
+		t.Fatalf("expected INVALID_LOGIN_REQUEST error: %s", response.Body.String())
 	}
 }
 
@@ -73,6 +107,26 @@ func TestRepositoryServerCreatesAndSavesProject(t *testing.T) {
 	}
 	if !bytes.Contains(getResponse.Body.Bytes(), []byte("Saved Repo UI")) {
 		t.Fatalf("saved project name not returned: %s", getResponse.Body.String())
+	}
+}
+
+func TestRepositoryServerCreateRejectsInvalidTarget(t *testing.T) {
+	handler := NewRepositoryServer(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo())
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{
+		"name":"Broken Repo UI",
+		"target":{"lvglVersion":"8.3","deviceName":"ESP32-S3","width":320.5,"height":240,"dpi":160,"colorDepth":16}
+	}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusBadRequest {
+		t.Fatalf("create project status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+	if !bytes.Contains(createResponse.Body.Bytes(), []byte(`"code":"INVALID_PROJECT_DOC"`)) {
+		t.Fatalf("expected invalid project doc error: %s", createResponse.Body.String())
 	}
 }
 
@@ -144,6 +198,39 @@ func TestRepositoryServerExportCreatesJobAndDownload(t *testing.T) {
 	}
 }
 
+func TestRepositoryServerJobDownloadRequiresSucceededStatus(t *testing.T) {
+	objectStore := storage.NewMemoryStore()
+	if err := objectStore.Put(context.Background(), "jobs/job-repo-1/lvgl-export.zip", []byte("zip bytes")); err != nil {
+		t.Fatal(err)
+	}
+	jobRepo := newFakeJobRepo()
+	jobRepo.jobs["job-repo-1"] = jobs.Job{
+		ID:              "job-repo-1",
+		OwnerID:         DemoUserID,
+		ProjectID:       "project-repo-1",
+		Kind:            "export_c",
+		Status:          "running",
+		Progress:        50,
+		ResultObjectKey: "jobs/job-repo-1/lvgl-export.zip",
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+	handler := NewRepositoryServerWithStorage(newFakeProjectRepo(), newFakeAssetRepo(), jobRepo, objectStore)
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	downloadRequest := httptest.NewRequest(http.MethodGet, "/api/jobs/job-repo-1/download", nil)
+	downloadRequest.Header.Set("Authorization", "Bearer "+token)
+	downloadResponse := httptest.NewRecorder()
+	handler.ServeHTTP(downloadResponse, downloadRequest)
+
+	if downloadResponse.Code != http.StatusNotFound {
+		t.Fatalf("download status = %d, body = %s", downloadResponse.Code, downloadResponse.Body.String())
+	}
+	if !bytes.Contains(downloadResponse.Body.Bytes(), []byte(`"code":"JOB_RESULT_NOT_FOUND"`)) {
+		t.Fatalf("expected missing result error: %s", downloadResponse.Body.String())
+	}
+}
+
 func TestRepositoryServerProjectVersionAcceptsDocumentedName(t *testing.T) {
 	projectRepo := newFakeProjectRepo()
 	handler := NewRepositoryServer(projectRepo, newFakeAssetRepo(), newFakeJobRepo())
@@ -175,6 +262,9 @@ func TestRepositoryServerProjectVersionAcceptsDocumentedName(t *testing.T) {
 	}
 	if projectRepo.versions[0].Name != "Before Build" {
 		t.Fatalf("expected version name from request name, got %q", projectRepo.versions[0].Name)
+	}
+	if !bytes.Contains(versionResponse.Body.Bytes(), []byte(`"label":"Before Build"`)) {
+		t.Fatalf("expected backward-compatible version label in response: %s", versionResponse.Body.String())
 	}
 }
 
@@ -211,9 +301,10 @@ func TestRepositoryServerProjectVersionAcceptsLegacyLabel(t *testing.T) {
 
 func TestRepositoryServerExportQueuesJobBeforeRunnerExecutes(t *testing.T) {
 	objectStore := storage.NewMemoryStore()
+	projectRepo := newFakeProjectRepo()
 	jobRepo := newFakeJobRepo()
 	runner := newCapturingJobRunner()
-	handler := NewRepositoryServerWithStorageAndRunner(newFakeProjectRepo(), newFakeAssetRepo(), jobRepo, objectStore, runner)
+	handler := NewRepositoryServerWithStorageAndRunner(projectRepo, newFakeAssetRepo(), jobRepo, objectStore, runner)
 	token := loginToken(t, handler, "demo@hiveton.dev")
 
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"Async Export UI"}`))
@@ -262,6 +353,72 @@ func TestRepositoryServerExportQueuesJobBeforeRunnerExecutes(t *testing.T) {
 	}
 	if _, err := objectStore.Get(context.Background(), job.ResultObjectKey); err != nil {
 		t.Fatalf("export archive missing after runner executes: %v", err)
+	}
+}
+
+func TestRepositoryServerExportCanSkipVersionSnapshot(t *testing.T) {
+	objectStore := storage.NewMemoryStore()
+	projectRepo := newFakeProjectRepo()
+	handler := NewRepositoryServerWithStorageAndRunner(projectRepo, newFakeAssetRepo(), newFakeJobRepo(), objectStore, newCapturingJobRunner())
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"No Snapshot Export UI"}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+	var createPayload struct {
+		Project projectRecord `json:"project"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	exportRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+createPayload.Project.ID+"/export/c", bytes.NewBufferString(`{"createVersion":false}`))
+	exportRequest.Header.Set("Authorization", "Bearer "+token)
+	exportResponse := httptest.NewRecorder()
+	handler.ServeHTTP(exportResponse, exportRequest)
+	if exportResponse.Code != http.StatusAccepted {
+		t.Fatalf("export status = %d, body = %s", exportResponse.Code, exportResponse.Body.String())
+	}
+	if len(projectRepo.versions) != 0 {
+		t.Fatalf("expected no build snapshot when createVersion is false, got %d", len(projectRepo.versions))
+	}
+}
+
+func TestRepositoryServerExportFailsWhenVersionSnapshotFails(t *testing.T) {
+	projectRepo := newFakeProjectRepo()
+	projectRepo.createVersionErr = errors.New("version insert failed")
+	jobRepo := newFakeJobRepo()
+	runner := newCapturingJobRunner()
+	handler := NewRepositoryServerWithStorageAndRunner(projectRepo, newFakeAssetRepo(), jobRepo, storage.NewMemoryStore(), runner)
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"Snapshot Failure UI"}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+	var createPayload struct {
+		Project projectRecord `json:"project"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	exportRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+createPayload.Project.ID+"/export/c", bytes.NewBufferString(`{"createVersion":true}`))
+	exportRequest.Header.Set("Authorization", "Bearer "+token)
+	exportResponse := httptest.NewRecorder()
+	handler.ServeHTTP(exportResponse, exportRequest)
+	if exportResponse.Code != http.StatusInternalServerError {
+		t.Fatalf("export status = %d, body = %s", exportResponse.Code, exportResponse.Body.String())
+	}
+	if !bytes.Contains(exportResponse.Body.Bytes(), []byte(`"code":"PROJECT_VERSION_CREATE_FAILED"`)) {
+		t.Fatalf("expected version create failure: %s", exportResponse.Body.String())
+	}
+	if len(jobRepo.jobs) != 0 {
+		t.Fatalf("expected no export job when snapshot fails, got %d", len(jobRepo.jobs))
+	}
+	if runner.Count() != 0 {
+		t.Fatalf("expected no queued export when snapshot fails, got %d", runner.Count())
 	}
 }
 
@@ -362,6 +519,92 @@ func TestRepositoryServerExportMarksAssetLoadFailures(t *testing.T) {
 	}
 }
 
+func TestRepositoryServerExportRejectsLegacyInvalidProjectDoc(t *testing.T) {
+	projectRepo := newFakeProjectRepo()
+	jobRepo := newFakeJobRepo()
+	handler := NewRepositoryServerWithStorage(projectRepo, newFakeAssetRepo(), jobRepo, storage.NewMemoryStore())
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"Legacy Invalid UI"}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+	var createPayload struct {
+		Project projectRecord `json:"project"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	project := projectRepo.projects[createPayload.Project.ID]
+	project.Doc["extraRoot"] = true
+	projectRepo.projects[createPayload.Project.ID] = project
+
+	exportRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+createPayload.Project.ID+"/export/c", bytes.NewBufferString(`{"createVersion":false}`))
+	exportRequest.Header.Set("Authorization", "Bearer "+token)
+	exportResponse := httptest.NewRecorder()
+	handler.ServeHTTP(exportResponse, exportRequest)
+	if exportResponse.Code != http.StatusBadRequest {
+		t.Fatalf("export status = %d, body = %s", exportResponse.Code, exportResponse.Body.String())
+	}
+	if !bytes.Contains(exportResponse.Body.Bytes(), []byte(`"code":"INVALID_PROJECT_DOC"`)) {
+		t.Fatalf("expected invalid ProjectDoc error: %s", exportResponse.Body.String())
+	}
+	if !bytes.Contains(exportResponse.Body.Bytes(), []byte(`unsupported ProjectDoc field extraRoot`)) {
+		t.Fatalf("expected invalid ProjectDoc details: %s", exportResponse.Body.String())
+	}
+	if len(projectRepo.versions) != 0 {
+		t.Fatalf("expected no snapshot for invalid ProjectDoc, got %d", len(projectRepo.versions))
+	}
+	if len(jobRepo.jobs) != 0 {
+		t.Fatalf("expected no job for invalid ProjectDoc, got %d", len(jobRepo.jobs))
+	}
+}
+
+func TestRepositoryServerExportRejectsLegacyInvalidProjectDocBeforeSnapshot(t *testing.T) {
+	projectRepo := newFakeProjectRepo()
+	jobRepo := newFakeJobRepo()
+	runner := newCapturingJobRunner()
+	handler := NewRepositoryServerWithStorageAndRunner(projectRepo, newFakeAssetRepo(), jobRepo, storage.NewMemoryStore(), runner)
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"Invalid Snapshot UI"}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+	var createPayload struct {
+		Project projectRecord `json:"project"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	project := projectRepo.projects[createPayload.Project.ID]
+	project.Doc["extraRoot"] = true
+	projectRepo.projects[createPayload.Project.ID] = project
+
+	exportRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+createPayload.Project.ID+"/export/c", nil)
+	exportRequest.Header.Set("Authorization", "Bearer "+token)
+	exportResponse := httptest.NewRecorder()
+	handler.ServeHTTP(exportResponse, exportRequest)
+
+	if exportResponse.Code != http.StatusBadRequest {
+		t.Fatalf("export status = %d, body = %s", exportResponse.Code, exportResponse.Body.String())
+	}
+	if !bytes.Contains(exportResponse.Body.Bytes(), []byte(`"code":"INVALID_PROJECT_DOC"`)) {
+		t.Fatalf("expected invalid ProjectDoc error: %s", exportResponse.Body.String())
+	}
+	if len(projectRepo.versions) != 0 {
+		t.Fatalf("expected no snapshot for invalid ProjectDoc, got %d", len(projectRepo.versions))
+	}
+	if len(jobRepo.jobs) != 0 {
+		t.Fatalf("expected no job for invalid ProjectDoc, got %d", len(jobRepo.jobs))
+	}
+	if runner.Count() != 0 {
+		t.Fatalf("expected no queued export for invalid ProjectDoc, got %d", runner.Count())
+	}
+}
+
 func TestRepositoryServerUploadAssetWritesObjectStorage(t *testing.T) {
 	objectStore := storage.NewMemoryStore()
 	assetRepo := newFakeAssetRepo()
@@ -386,6 +629,9 @@ func TestRepositoryServerUploadAssetWritesObjectStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := file.Write(tinyPNG()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("kind", "image"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -527,6 +773,96 @@ func TestRepositoryServerUploadFontAssetWritesMetadata(t *testing.T) {
 	}
 }
 
+func TestRepositoryServerDeleteReferencedFontAssetReturnsGenericReferenceMessage(t *testing.T) {
+	objectStore := storage.NewMemoryStore()
+	handler := NewRepositoryServerWithStorage(newFakeProjectRepo(), newFakeAssetRepo(), newFakeJobRepo(), objectStore)
+	token := loginToken(t, handler, "demo@hiveton.dev")
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{"name":"Referenced Font UI"}`))
+	createRequest.Header.Set("Authorization", "Bearer "+token)
+	createResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createResponse, createRequest)
+	var createPayload struct {
+		Project projectRecord `json:"project"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", "brand.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("ttf font bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("kind", "font"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	uploadRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+createPayload.Project.ID+"/assets", &body)
+	uploadRequest.Header.Set("Authorization", "Bearer "+token)
+	uploadRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadResponse := httptest.NewRecorder()
+	handler.ServeHTTP(uploadResponse, uploadRequest)
+	if uploadResponse.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, body = %s", uploadResponse.Code, uploadResponse.Body.String())
+	}
+	var uploadPayload struct {
+		Asset assets.Asset `json:"asset"`
+	}
+	if err := json.Unmarshal(uploadResponse.Body.Bytes(), &uploadPayload); err != nil {
+		t.Fatal(err)
+	}
+
+	assetRaw, err := json.Marshal(uploadPayload.Asset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assetDoc map[string]any
+	if err := json.Unmarshal(assetRaw, &assetDoc); err != nil {
+		t.Fatal(err)
+	}
+	createPayload.Project.Doc["assets"] = []any{assetDoc}
+	createPayload.Project.Doc["styles"] = []any{
+		map[string]any{
+			"id":    "style-brand",
+			"name":  "Brand",
+			"style": map[string]any{"font": uploadPayload.Asset.ID},
+		},
+	}
+	saveBody, err := json.Marshal(map[string]any{"doc": createPayload.Project.Doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveRequest := httptest.NewRequest(http.MethodPut, "/api/projects/"+createPayload.Project.ID+"/doc", bytes.NewReader(saveBody))
+	saveRequest.Header.Set("Authorization", "Bearer "+token)
+	saveResponse := httptest.NewRecorder()
+	handler.ServeHTTP(saveResponse, saveRequest)
+	if saveResponse.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %s", saveResponse.Code, saveResponse.Body.String())
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/projects/"+createPayload.Project.ID+"/assets/"+uploadPayload.Asset.ID, nil)
+	deleteRequest.Header.Set("Authorization", "Bearer "+token)
+	deleteResponse := httptest.NewRecorder()
+	handler.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusConflict {
+		t.Fatalf("delete status = %d, body = %s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+	if !bytes.Contains(deleteResponse.Body.Bytes(), []byte(`"code":"ASSET_IN_USE"`)) {
+		t.Fatalf("expected ASSET_IN_USE: %s", deleteResponse.Body.String())
+	}
+	if !bytes.Contains(deleteResponse.Body.Bytes(), []byte(`"message":"asset is still referenced by ProjectDoc"`)) {
+		t.Fatalf("expected generic asset reference message: %s", deleteResponse.Body.String())
+	}
+}
+
 func uploadRepositoryTestAsset(t *testing.T, handler http.Handler, token string, projectID string, filename string, content []byte) assets.Asset {
 	t.Helper()
 	var body bytes.Buffer
@@ -536,6 +872,9 @@ func uploadRepositoryTestAsset(t *testing.T, handler http.Handler, token string,
 		t.Fatal(err)
 	}
 	if _, err := file.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("kind", "image"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -582,6 +921,9 @@ func TestRepositoryServerExportEmbedsUploadedImageAssetBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := file.Write(tinyPNG()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("kind", "image"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -670,9 +1012,10 @@ func loginToken(t *testing.T, handler http.Handler, email string) string {
 }
 
 type fakeProjectRepo struct {
-	projects map[string]projects.Project
-	versions []projects.ProjectVersion
-	next     int
+	projects         map[string]projects.Project
+	versions         []projects.ProjectVersion
+	next             int
+	createVersionErr error
 }
 
 func newFakeProjectRepo() *fakeProjectRepo {
@@ -720,7 +1063,10 @@ func (repo *fakeProjectRepo) CreateVersion(ctx context.Context, ownerID string, 
 	if _, err := repo.Get(ctx, ownerID, projectID); err != nil {
 		return projects.ProjectVersion{}, err
 	}
-	version := projects.ProjectVersion{ID: "version-repo-1", ProjectID: projectID, OwnerID: ownerID, Name: name, Doc: doc, CreatedAt: time.Now().UTC()}
+	if repo.createVersionErr != nil {
+		return projects.ProjectVersion{}, repo.createVersionErr
+	}
+	version := projects.ProjectVersion{ID: "version-repo-1", ProjectID: projectID, OwnerID: ownerID, Name: name, Label: name, Doc: doc, CreatedAt: time.Now().UTC()}
 	repo.versions = append(repo.versions, version)
 	return version, nil
 }

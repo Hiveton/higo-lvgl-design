@@ -1,3 +1,5 @@
+import { isRecord, isNonEmptyString } from "./utils";
+
 export type ErrorPayload = {
   error?: {
     code?: string;
@@ -21,9 +23,10 @@ export async function apiError(response: Response, fallbackCode: string, fallbac
   let code = fallbackCode;
   let message = fallbackMessage;
   try {
-    const payload = (await response.clone().json()) as ErrorPayload;
-    code = payload.error?.code || code;
-    message = payload.error?.message || message;
+    const payload = await response.clone().json();
+    const error = errorBodyFromPayload(payload);
+    code = error?.code ?? code;
+    message = error?.message ?? message;
   } catch {
     // Keep the endpoint-specific fallback when the body is not JSON.
   }
@@ -44,7 +47,23 @@ export function apiErrorFromPayload(
   fallbackCode: string,
   fallbackMessage: string
 ): ApiError {
-  const code = payload?.error?.code || fallbackCode;
-  const message = payload?.error?.message || fallbackMessage;
+  const error = errorBodyFromPayload(payload);
+  const code = error?.code ?? fallbackCode;
+  const message = error?.message ?? fallbackMessage;
   return new ApiError(message, response.status, code, message);
 }
+
+function errorBodyFromPayload(payload: unknown): Required<ErrorPayload>["error"] | undefined {
+  if (!isRecord(payload) || !isRecord(payload.error)) {
+    return undefined;
+  }
+  if (!isNonEmptyString(payload.error.code) || !isNonEmptyString(payload.error.message)) {
+    return undefined;
+  }
+  return {
+    code: payload.error.code,
+    message: payload.error.message
+  };
+}
+
+

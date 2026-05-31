@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { ApiError } from "../api/errors";
 import { getJob, type JobResponse } from "../api/jobs";
 import { exportProjectC } from "../api/projects";
 import { editorCopy } from "../i18n/copy";
@@ -17,6 +18,7 @@ export type BuildLogEntry = {
 
 type StartExportOptions = {
   buildFailedMessage?: string;
+  createVersion?: boolean;
   jobStatusMessage?: (status: string) => string;
   pollLimit?: number;
   pollIntervalMs?: number;
@@ -29,33 +31,52 @@ export const useJobsStore = defineStore("jobs", () => {
   const exportDownloadUrl = ref<string | null>(null);
   const logEntries = ref<BuildLogEntry[]>([]);
   const appendedLogKeys = ref<Set<string>>(new Set());
+  let exportRunId = 0;
+
+  function resetRunState(): void {
+    exportDownloadUrl.value = null;
+    logEntries.value = [];
+    appendedLogKeys.value = new Set();
+  }
 
   function beginSaving(): boolean {
     if (buildStatus.value === "saving" || buildStatus.value === "queued" || buildStatus.value === "running") {
       return false;
     }
     buildStatus.value = "saving";
-    exportDownloadUrl.value = null;
-    logEntries.value = [];
-    appendedLogKeys.value = new Set();
+    resetRunState();
     return true;
   }
 
   async function startExport(projectId: string, options: StartExportOptions = {}): Promise<boolean> {
+    const runId = ++exportRunId;
     const pollLimit = options.pollLimit ?? 10;
     const pollIntervalMs = options.pollIntervalMs ?? 500;
     const jobStatusMessage = options.jobStatusMessage ?? ((status: string) => editorCopy[localeStore.locale].runtime.jobStatus(status));
     const pollTimeoutMessage = options.pollTimeoutMessage ?? ((limit: number) => editorCopy[localeStore.locale].runtime.jobTimedOut(limit));
+    resetRunState();
     buildStatus.value = "queued";
     try {
-      const exportResponse = await exportProjectC(projectId);
+      const exportResponse = await exportProjectC(projectId, { createVersion: options.createVersion });
+      if (runId !== exportRunId) {
+        return false;
+      }
       appendUniqueJobLog(exportResponse.jobId, "status:queued", jobStatusMessage("queued"));
       let finished = false;
       for (let attempt = 0; attempt < pollLimit; attempt += 1) {
         const jobResponse = await getJob(exportResponse.jobId);
+        if (runId !== exportRunId) {
+          return false;
+        }
+        if (jobResponse.job.projectId !== undefined && jobResponse.job.projectId !== projectId) {
+          throw new ApiError("job belongs to another project", 200, "JOB_LOOKUP_FAILED");
+        }
         appendJobLogs(jobResponse, jobStatusMessage);
         buildStatus.value = jobStatusToBuildStatus(jobResponse.job.status);
         if (jobResponse.job.status === "succeeded" || jobResponse.job.status === "failed") {
+          if (jobResponse.job.status === "failed" && !jobResponse.job.error && jobResponse.job.logs.length === 0 && options.buildFailedMessage) {
+            appendUniqueJobLog(exportResponse.jobId, "failed-without-detail", options.buildFailedMessage);
+          }
           finished = true;
           break;
         }
@@ -69,15 +90,18 @@ export const useJobsStore = defineStore("jobs", () => {
       }
       return buildStatus.value === "succeeded";
     } catch (error) {
+      if (runId !== exportRunId) {
+        return false;
+      }
       buildStatus.value = "failed";
-      appendLog(localizeError(error, localeStore.locale, "BUILD_FAILED"), "10:21:12");
+      appendLog(localizeError(error, localeStore.locale, "BUILD_FAILED"), new Date().toLocaleTimeString());
       return false;
     }
   }
 
   function markFailed(message: string): void {
     buildStatus.value = "failed";
-    appendLog(message, "10:21:12");
+    appendLog(message, new Date().toLocaleTimeString());
   }
 
   function appendJobLogs(jobResponse: JobResponse, jobStatusMessage: (status: string) => string): void {
@@ -98,7 +122,7 @@ export const useJobsStore = defineStore("jobs", () => {
     }
   }
 
-  function appendUniqueJobLog(jobId: string, key: string, message: string, time = "10:21:12"): void {
+  function appendUniqueJobLog(jobId: string, key: string, message: string, time = new Date().toLocaleTimeString()): void {
     if (appendedLogKeys.value.has(key)) {
       return;
     }

@@ -26,6 +26,7 @@ type ProjectVersion struct {
 	ProjectID string         `json:"projectId"`
 	OwnerID   string         `json:"-"`
 	Name      string         `json:"name"`
+	Label     string         `json:"label"`
 	Doc       map[string]any `json:"doc"`
 	CreatedAt time.Time      `json:"createdAt"`
 }
@@ -177,6 +178,7 @@ func scanProjectVersion(scanner projectScanner) (ProjectVersion, error) {
 	if err := json.Unmarshal(rawDoc, &version.Doc); err != nil {
 		return ProjectVersion{}, err
 	}
+	version.Label = version.Name
 	return version, nil
 }
 

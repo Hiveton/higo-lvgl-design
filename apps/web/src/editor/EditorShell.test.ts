@@ -1,26 +1,27 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearAuthToken } from "../api/auth";
-import type { ScreenNode } from "@hiveton-lvgl/schema";
+import { clearAuthToken, getAuthToken, setAuthToken } from "../api/auth";
+import { createDefaultProjectDoc, type ScreenNode } from "@hiveton-lvgl/schema";
 import EditorShell from "./EditorShell.vue";
 import LogPanel from "./LogPanel.vue";
 import ScreensPanel from "./ScreensPanel.vue";
 import { useAssetsStore } from "../stores/assets";
+import { useAuthStore } from "../stores/auth";
 import { useLocaleStore } from "../stores/locale";
 import { useProjectStore } from "../stores/project";
 
-function assetUploadResponse(): Response {
+function assetUploadResponse(projectId = "project-1"): Response {
   return new Response(
     JSON.stringify({
       asset: {
         id: "asset-1",
-        projectId: "project-watch-demo",
+        projectId,
         name: "icon_heart.png",
         kind: "image",
         mimeType: "image/png",
         sizeBytes: 12,
-        objectKey: "projects/project-watch-demo/assets/asset-1/icon_heart.png",
+        objectKey: `projects/${projectId}/assets/asset-1/icon_heart.png`,
         createdAt: "2026-05-08T00:00:00Z"
       }
     }),
@@ -28,17 +29,17 @@ function assetUploadResponse(): Response {
   );
 }
 
-function fontAssetUploadResponse(): Response {
+function fontAssetUploadResponse(projectId = "project-1"): Response {
   return new Response(
     JSON.stringify({
       asset: {
         id: "font-1",
-        projectId: "project-watch-demo",
+        projectId,
         name: "watch_digits.ttf",
         kind: "font",
         mimeType: "font/ttf",
         sizeBytes: 2048,
-        objectKey: "projects/project-watch-demo/assets/font-1/watch_digits.ttf",
+        objectKey: `projects/${projectId}/assets/font-1/watch_digits.ttf`,
         createdAt: "2026-05-08T00:00:00Z"
       }
     }),
@@ -46,8 +47,8 @@ function fontAssetUploadResponse(): Response {
   );
 }
 
-function projectSaveResponse(): Response {
-  return new Response(JSON.stringify({ projectId: "project-watch-demo", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 });
+function projectSaveResponse(projectId = "project-1"): Response {
+  return new Response(JSON.stringify({ projectId, updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 });
 }
 
 function projectCreateResponse(projectId = "project-1"): Response {
@@ -56,12 +57,42 @@ function projectCreateResponse(projectId = "project-1"): Response {
       project: {
         id: projectId,
         name: "My Watch UI",
+        createdAt: "2026-05-08T00:00:00Z",
         updatedAt: "2026-05-08T00:00:00Z",
-        doc: {}
+        doc: apiProjectDoc(projectId, "My Watch UI")
       }
     }),
     { status: 201 }
   );
+}
+
+function apiProjectDoc(id: string, name: string) {
+  return createDefaultProjectDoc({
+    id,
+    name,
+    updatedAt: "2026-05-08T00:00:00Z"
+  });
+}
+
+function apiProject(id: string, name: string, doc: unknown) {
+  return {
+    id,
+    name,
+    doc,
+    createdAt: "2026-05-08T00:00:00Z",
+    updatedAt: "2026-05-08T00:00:00Z"
+  };
+}
+
+function job(overrides: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: "job-1",
+    kind: "export_c",
+    status: "queued",
+    progress: 0,
+    logs: [],
+    ...overrides
+  };
 }
 
 function signInForCloudSaves(): void {
@@ -518,6 +549,16 @@ describe("EditorShell", () => {
         event: "LV_EVENT_CLICKED",
         handlerName: "time_label_clicked"
       });
+      store.project.styles.push({
+        id: "style-primary",
+        name: "Primary Button",
+        style: {
+          bgColor: "#2FBF71",
+          textColor: "#FFFFFF",
+          radius: 12,
+          padding: { top: 0, right: 8, bottom: 0, left: 8 }
+        }
+      });
       timeLabel.style.textColor = "#abc";
       timeLabel.style.bgColor = "red";
       store.registerAsset({
@@ -534,6 +575,20 @@ describe("EditorShell", () => {
       });
       store.addWidgetFromCatalog("image", { x: 32, y: 60 });
       store.bindSelectedImageAsset("asset-icon-heart");
+      store.registerAsset({
+        id: "asset-icon-heart-copy",
+        projectId: store.project.id,
+        name: "icon-heart.png",
+        kind: "image",
+        mimeType: "image/png",
+        width: 16,
+        height: 16,
+        sizeBytes: 1024,
+        objectKey: "projects/project-watch-demo/assets/icon-heart-copy.png",
+        createdAt: "2026-05-08T00:00:00Z"
+      });
+      store.addWidgetFromCatalog("image", { x: 160, y: 60 });
+      store.bindSelectedImageAsset("asset-icon-heart-copy");
     }
 
     await wrapper.get('[data-testid="widget-card-container"]').trigger("click");
@@ -545,9 +600,19 @@ describe("EditorShell", () => {
     const preview = wrapper.get('[data-testid="code-preview"]').text();
     expect(preview).toContain("lv_obj_t * ui_Time_Label;");
     expect(preview).toContain("lv_obj_t * ui_Settings_Button_Label;");
+    expect(preview).toContain("static lv_style_t ui_style_Primary_Button;");
+    expect(preview).toContain("static void ui_init_styles(void)");
+    expect(preview).toContain("lv_style_init(&ui_style_Primary_Button);");
+    expect(preview).toContain("lv_style_set_bg_color(&ui_style_Primary_Button, lv_color_hex(0x2FBF71));");
+    expect(preview).toContain("lv_style_set_text_color(&ui_style_Primary_Button, lv_color_hex(0xFFFFFF));");
+    expect(preview).toContain("lv_style_set_radius(&ui_style_Primary_Button, 12);");
+    expect(preview).toContain("lv_style_set_pad_left(&ui_style_Primary_Button, 8);");
+    expect(preview).toContain("lv_style_set_pad_right(&ui_style_Primary_Button, 8);");
     expect(preview).toContain("lv_label_create(ui_Screen_1)");
+    expect(preview).toContain("ui_init_styles();");
     expect(preview).toContain("lv_obj_set_layout(ui_Screen_1, LV_LAYOUT_FLEX);");
     expect(preview).toContain("lv_obj_set_flex_flow(ui_Screen_1, LV_FLEX_FLOW_COLUMN_WRAP);");
+    expect(preview).toContain("lv_obj_set_style_bg_color(ui_Screen_1, lv_color_hex(0x101010), LV_PART_MAIN | LV_STATE_DEFAULT);");
     expect(preview).toContain("lv_obj_align(ui_Time_Label, LV_ALIGN_CENTER, 150, 40);");
     expect(preview).toContain('lv_label_set_text(ui_Time_Label, "10:09");');
     expect(preview).toContain("lv_obj_add_event_cb(ui_Time_Label, time_label_clicked, LV_EVENT_CLICKED, NULL);");
@@ -558,6 +623,7 @@ describe("EditorShell", () => {
     expect(preview).toContain("ui_Label_1 = lv_label_create(ui_Container_1);");
     expect(preview).toContain("lv_slider_set_range(ui_Slider_1, 0, 100);");
     expect(preview).toContain("lv_img_set_src(ui_Image_1, &ui_img_icon_heart_png);");
+    expect(preview).toContain("lv_img_set_src(ui_Image_2, &ui_img_icon_heart_png_2);");
     expect(preview).not.toContain("0xtransparent");
     expect(preview).not.toContain("0xred");
   });
@@ -616,6 +682,92 @@ describe("EditorShell", () => {
     const preview = wrapper.get('[data-testid="code-preview"]').text();
     expect(preview).toContain("Code generation blocked: missing font asset missing-font-asset");
     expect(preview).not.toContain("metadata only");
+    wrapper.unmount();
+  });
+
+  it("blocks the generated code preview for unsupported lv_font symbols and reusable style font gaps", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    const root = store.activeScreen?.root;
+    if (!root) {
+      throw new Error("expected active screen root");
+    }
+    root.children[0].style.font = "lv_font_custom_24";
+    store.project.styles.push({
+      id: "style-custom-font",
+      name: "Custom Font",
+      style: { font: "missing-style-font" }
+    });
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("Code generation blocked: missing font asset lv_font_custom_24");
+    expect(preview).toContain("Code generation blocked: missing font asset missing-style-font");
+    expect(preview).not.toContain("&lv_font_custom_24");
+    wrapper.unmount();
+  });
+
+  it("blocks the generated code preview when asset references have the wrong kind", async () => {
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const store = useProjectStore(pinia);
+    store.registerAsset({
+      id: "font-asset",
+      projectId: store.project.id,
+      name: "brand.ttf",
+      kind: "font",
+      mimeType: "font/ttf",
+      sizeBytes: 2048,
+      objectKey: "projects/project-watch-demo/assets/font-asset/brand.ttf",
+      createdAt: "2026-05-08T00:00:00Z"
+    });
+    store.registerAsset({
+      id: "image-asset",
+      projectId: store.project.id,
+      name: "icon.png",
+      kind: "image",
+      mimeType: "image/png",
+      width: 16,
+      height: 16,
+      sizeBytes: 1024,
+      objectKey: "projects/project-watch-demo/assets/image-asset/icon.png",
+      createdAt: "2026-05-08T00:00:00Z"
+    });
+    const root = store.activeScreen?.root;
+    if (!root) {
+      throw new Error("expected active screen root");
+    }
+    root.children.push({
+      id: "wrong-image",
+      type: "image",
+      name: "Wrong_Image",
+      parentId: root.id,
+      children: [],
+      layout: { x: 10, y: 20, width: 96, height: 96 },
+      props: { assetId: "font-asset" },
+      style: { font: "image-asset" },
+      locked: false,
+      hidden: false
+    });
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-testid="code-preview"]').text();
+    expect(preview).toContain("Code generation blocked: image widget must reference an image asset font-asset");
+    expect(preview).toContain("Code generation blocked: font style must reference a font asset image-asset");
+    expect(preview).not.toContain("lv_img_set_src");
     wrapper.unmount();
   });
 
@@ -910,6 +1062,36 @@ describe("EditorShell", () => {
     expect(wrapper.find('[data-testid="canvas-stage"]').exists()).toBe(true);
   });
 
+  it("falls back to selection copy when Clipboard API write is rejected", async () => {
+    const writeText = vi.fn(async () => {
+      throw new Error("clipboard permission denied");
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand
+    });
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText }
+    });
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    await wrapper.get('[data-testid="copy-code-button"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("void ui_Screen_1_screen_init(void)"));
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(wrapper.get('[data-testid="code-copy-status"]').text()).toBe("Code copied");
+
+    wrapper.unmount();
+  });
+
   it("adds a real screen from the canvas tab plus button", async () => {
     const wrapper = mount(EditorShell, {
       global: {
@@ -929,26 +1111,30 @@ describe("EditorShell", () => {
 
   it("adds log entries when Preview and Build are clicked", async () => {
     signInForCloudSaves();
+    const revokeObjectURL = vi.fn().mockImplementation(() => {
+      throw new Error("revoke blocked");
+    });
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: vi.fn().mockReturnValue("blob:export-zip"),
-      revokeObjectURL: vi.fn()
+      revokeObjectURL
     });
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(projectCreateResponse())
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projectId: "project-watch-demo", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 }))
+      .mockResolvedValueOnce(projectSaveResponse())
       .mockResolvedValueOnce(new Response(JSON.stringify({ jobId: "job-1" }), { status: 202 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        job: {
+        job: job({
           id: "job-1",
           status: "succeeded",
+          progress: 100,
           logs: [
             { time: "2026-05-08T00:00:00Z", level: "info", message: "Build started" },
             { time: "2026-05-08T00:00:01Z", level: "info", message: "Build completed successfully" }
           ],
           result: { downloadUrl: "/api/jobs/job-1/download" }
-        }
+        })
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(new Blob(["zip"]), { status: 200, headers: { "Content-Type": "application/zip" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -997,6 +1183,7 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="download-export-build-tab-button"]').attributes("title")).toBe("Download My Watch UI LVGL C zip");
     expect(wrapper.get('[data-testid="download-export-build-tab-button"]').text()).toBe("");
 
+    vi.useFakeTimers();
     await wrapper.get('[data-testid="download-export-build-tab-button"]').trigger("click");
     await flushPromises();
     await wrapper.vm.$nextTick();
@@ -1004,6 +1191,8 @@ describe("EditorShell", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/jobs/job-1/download", expect.objectContaining({ headers: expect.any(Object) }));
     expect(anchorClick).toHaveBeenCalled();
     expect(wrapper.text()).toContain("Export zip downloaded");
+    expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:export-zip");
     await wrapper.get('[data-testid="bottom-log-tab"]').trigger("click");
     expect(wrapper.get('[data-testid="console-log-stream"]').attributes("role")).toBe("status");
     expect(wrapper.get('[data-testid="console-log-stream"]').attributes("aria-live")).toBe("polite");
@@ -1028,6 +1217,8 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="bottom-log-tab"]').attributes("type")).toBe("button");
     expect(wrapper.get('[data-testid="bottom-log-tab"]').attributes("aria-selected")).toBe("true");
     expect(wrapper.get('[data-testid="bottom-log-tab"]').attributes("tabindex")).toBe("0");
+    expect(wrapper.get('[data-testid="bottom-log-tab"]').text()).toBe("Console");
+    expect(wrapper.get('[data-testid="bottom-timeline-tab"]').text()).toBe("Timeline");
     expect(wrapper.get('[data-testid="bottom-timeline-tab"]').attributes("aria-selected")).toBe("false");
     expect(wrapper.get('[data-testid="bottom-timeline-tab"]').attributes("tabindex")).toBe("-1");
 
@@ -1094,22 +1285,24 @@ describe("EditorShell", () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(projectCreateResponse())
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projectId: "project-watch-demo", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 }))
+      .mockResolvedValueOnce(projectSaveResponse())
       .mockResolvedValueOnce(new Response(JSON.stringify({ jobId: "job-2" }), { status: 202 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        job: {
+        job: job({
           id: "job-2",
           status: "running",
+          progress: 50,
           logs: [{ time: "2026-05-08T00:00:00Z", level: "info", message: "Generating code" }]
-        }
+        })
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        job: {
+        job: job({
           id: "job-2",
           status: "succeeded",
+          progress: 100,
           logs: [{ time: "2026-05-08T00:00:01Z", level: "info", message: "Build completed successfully" }],
           result: { downloadUrl: "/api/jobs/job-2/download" }
-        }
+        })
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const wrapper = mount(EditorShell, {
@@ -1142,15 +1335,16 @@ describe("EditorShell", () => {
     signInForCloudSaves();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(projectCreateResponse())
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projectId: "project-watch-demo", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 }))
+      .mockResolvedValueOnce(projectSaveResponse())
       .mockResolvedValueOnce(new Response(JSON.stringify({ jobId: "job-failed" }), { status: 202 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        job: {
+        job: job({
           id: "job-failed",
           status: "failed",
+          progress: 100,
           logs: [],
           error: { code: "CODEGEN_FAILED", message: "image widget references missing asset" }
-        }
+        })
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const wrapper = mount(EditorShell, {
@@ -1173,11 +1367,12 @@ describe("EditorShell", () => {
     signInForCloudSaves();
     vi.useFakeTimers();
     const runningJobResponse = {
-      job: {
+      job: job({
         id: "job-timeout",
         status: "running",
+        progress: 50,
         logs: [{ time: "2026-05-08T00:00:00Z", level: "info", message: "Generating code" }]
-      }
+      })
     };
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -1251,6 +1446,65 @@ describe("EditorShell", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(wrapper.find('[data-testid="build-status-failed"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="build-button"]').attributes("title")).toBe("Sign in to build and export LVGL C code");
+  });
+
+  it("disables cloud build when session restore clears a stale token", async () => {
+    setAuthToken("stale-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "missing or invalid token" } }), { status: 401 })
+    ));
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+
+    expect(wrapper.get('[data-testid="build-button"]').element).toHaveProperty("disabled", false);
+
+    await useAuthStore(pinia).restoreSession();
+    await flushPromises();
+
+    expect(getAuthToken()).toBeNull();
+    expect(wrapper.get('[data-testid="build-button"]').element).toHaveProperty("disabled", true);
+    expect(wrapper.get('[data-testid="build-button"]').text()).toBe("Login to Build");
+  });
+
+  it("stops build when edits happen while the pre-build save is in flight", async () => {
+    signInForCloudSaves();
+    let resolveSave: (response: Response) => void = () => undefined;
+    const savePromise = new Promise<Response>((resolve) => {
+      resolveSave = resolve;
+    });
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(projectCreateResponse());
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return savePromise;
+      }
+      if (String(url).includes("/export/c")) {
+        return Promise.resolve(new Response(JSON.stringify({ jobId: "job-stale" }), { status: 202 }));
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="build-button"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/doc", expect.objectContaining({ method: "PUT" }));
+
+    await wrapper.get('[data-testid="widget-card-label"]').trigger("click");
+    resolveSave(new Response(JSON.stringify({ projectId: "project-1", updatedAt: "2026-05-08T00:00:00Z" }), { status: 200 }));
+    await flushPromises();
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/export/c"))).toBe(false);
+    expect(wrapper.text()).toContain("Build stopped because there are new unsaved changes");
   });
 
   it("opens and closes a full device preview overlay", async () => {
@@ -1492,6 +1746,28 @@ describe("EditorShell", () => {
     expect(JSON.stringify(store.project)).toBe(beforeDoc);
   });
 
+  it("shows unavailable feedback when preview screenshot capture throws", async () => {
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const canvas = wrapper.get('[data-testid="simulator-canvas"]').element as HTMLCanvasElement;
+    vi.spyOn(canvas, "toDataURL").mockImplementation(() => {
+      throw new Error("canvas is tainted");
+    });
+
+    await wrapper.get('[data-testid="preview-button"]').trigger("click");
+    await wrapper.get('[data-testid="screenshot-preview-button"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="preview-status-message"]').text()).toBe("Screenshot unavailable");
+    expect(wrapper.find('[data-testid="preview-screenshot-link"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Screenshot unavailable");
+
+    wrapper.unmount();
+  });
+
   it("shows screen, event and command entries in the timeline tab", async () => {
     const wrapper = mount(EditorShell, {
       global: {
@@ -1616,6 +1892,24 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="code-preview"]').text()).toContain("Font asset font-1 is registered as metadata only");
   });
 
+  it("warns in the inspector when a text widget uses an unsupported custom font symbol", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const projectStore = useProjectStore();
+    if (!projectStore.selectedWidget) {
+      throw new Error("expected a selected widget");
+    }
+    projectStore.selectedWidget.style.font = "lv_font_custom_24";
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="font-asset-warning"]').text()).toBe("Unknown font asset or unsupported LVGL font symbol: lv_font_custom_24");
+    expect(wrapper.get('[data-testid="style-font-select"]').attributes("aria-describedby")).toBe("font-asset-warning");
+    expect(wrapper.get('[data-testid="style-font-select"]').attributes("aria-invalid")).toBe("true");
+  });
+
   it("updates selected widget style fields from the inspector", async () => {
     const wrapper = mount(EditorShell, {
       global: {
@@ -1634,6 +1928,8 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="style-opacity-input"]').attributes("aria-label")).toBe("Opacity");
     expect(wrapper.get('[data-testid="style-opacity-input"]').attributes("min")).toBe("0");
     expect(wrapper.get('[data-testid="style-opacity-input"]').attributes("max")).toBe("100");
+    expect(wrapper.get('[data-testid="style-blend-mode-select"]').attributes("aria-label")).toBe("Blend mode");
+    expect(wrapper.get('[data-testid="style-blend-mode-select"]').attributes("title")).toBe("Blend mode");
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("type")).toBe("number");
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("aria-label")).toBe("Radius");
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("title")).toBe("Radius");
@@ -1668,6 +1964,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="style-border-color-input"]').setValue("#FFCC00");
     await wrapper.get('[data-testid="style-font-select"]').setValue("lv_font_montserrat_32");
     await wrapper.get('[data-testid="style-align-select"]').setValue("right");
+    await wrapper.get('[data-testid="style-blend-mode-select"]').setValue("multiply");
     await wrapper.get('[data-testid="style-radius-input"]').setValue("16");
     await wrapper.get('[data-testid="style-opacity-input"]').setValue("64");
     await wrapper.get('[data-testid="style-padding-top-input"]').setValue("6");
@@ -1683,6 +1980,7 @@ describe("EditorShell", () => {
     expect(widget.attributes("style")).toContain("border-color: rgb(255, 204, 0)");
     expect(widget.attributes("style")).toContain("border-radius: 16px");
     expect(widget.attributes("style")).toContain("opacity: 0.64");
+    expect(widget.attributes("style")).toContain("mix-blend-mode: multiply");
     expect(widget.attributes("style")).toContain("padding: 6px 8px 10px 12px");
     expect(widget.attributes("style")).toContain("text-align: right");
     expect(widget.attributes("style")).toContain("letter-spacing: 2px");
@@ -1695,6 +1993,26 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="style-border-color-swatch"]').attributes("style")).toContain("background-color: rgb(255, 204, 0)");
     expect(wrapper.get('[data-testid="style-border-color-swatch"]').attributes("aria-label")).toBe("Border color preview #FFCC00");
     expect(wrapper.get('[data-testid="style-border-color-swatch"]').attributes("title")).toBe("Border color preview #FFCC00");
+  });
+
+  it("rejects invalid inspector color values before updating ProjectDoc", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const store = useProjectStore();
+
+    await wrapper.get('[data-testid="style-bg-color-input"]').setValue("red");
+
+    expect(store.selectedWidget?.style.bgColor ?? "").toBe("");
+    expect(wrapper.get('[data-testid="style-bg-color-error"]').text()).toBe("Background color must be a 3 or 6 digit hex color");
+    expect(wrapper.get('[data-testid="style-bg-color-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="style-bg-color-input"]').setValue("#123abc");
+
+    expect(store.selectedWidget?.style.bgColor).toBe("#123abc");
+    expect(wrapper.find('[data-testid="style-bg-color-error"]').exists()).toBe(false);
   });
 
   it("edits widget-specific props from the inspector", async () => {
@@ -1729,12 +2047,17 @@ describe("EditorShell", () => {
     expect(store.selectedWidget?.props).toMatchObject({ text: "Enable logs", checked: true });
 
     await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
+    await wrapper.get('[data-testid="selected-text-input"]').setValue("Mode");
     expect(wrapper.get('[data-testid="prop-options-input"]').attributes("aria-label")).toBe("Dropdown options");
     expect(wrapper.get('[data-testid="prop-options-input"]').attributes("title")).toBe("Dropdown options");
     expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-label")).toBe("Selected option index");
     await wrapper.get('[data-testid="prop-options-input"]').setValue("Auto\nManual\nOff");
     await wrapper.get('[data-testid="prop-selected-input"]').setValue("1");
-    expect(store.selectedWidget?.props).toMatchObject({ options: "Auto\nManual\nOff", selected: 1 });
+    expect(wrapper.get('[data-testid="canvas-widget-dropdown-1"] .dropdown-preview').text()).toContain("Mode");
+    await wrapper.get('[data-testid="code-nav-button"]').trigger("click");
+    expect(wrapper.get('[data-testid="code-preview"]').text()).toContain('lv_dropdown_set_text(ui_Dropdown_1, "Mode");');
+    await wrapper.get('[data-testid="widgets-nav-button"]').trigger("click");
+    expect(store.selectedWidget?.props).toMatchObject({ text: "Mode", options: "Auto\nManual\nOff", selected: 1 });
 
     await wrapper.get('[data-testid="widget-card-spinner"]').trigger("click");
     expect(wrapper.get('[data-testid="prop-spin-time-input"]').attributes("aria-label")).toBe("Spin time");
@@ -1801,6 +2124,43 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-invalid")).toBeUndefined();
     expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-describedby")).toBeUndefined();
     expect(store.selectedWidget?.props.selected).toBe(1);
+
+    await wrapper.get('[data-testid="prop-selected-input"]').setValue("2");
+    expect(wrapper.get('[data-testid="prop-selected-error"]').text()).toBe("Selected must be between 0 and 1");
+    expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-describedby")).toBe("prop-selected-error");
+    expect(store.selectedWidget?.props.selected).toBe(1);
+
+    await wrapper.get('[data-testid="prop-options-input"]').setValue("Only");
+    expect(store.selectedWidget?.props).toMatchObject({ options: "Only", selected: 0 });
+    expect(wrapper.find('[data-testid="prop-selected-error"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="widget-card-slider"]').trigger("click");
+    await wrapper.get('[data-testid="prop-max-input"]').setValue("-1");
+    expect(wrapper.get('[data-testid="prop-max-error"]').text()).toBe("Max must be greater than Min");
+    expect(wrapper.get('[data-testid="prop-max-error"]').attributes("role")).toBe("alert");
+    expect(wrapper.get('[data-testid="prop-max-input"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="prop-max-input"]').attributes("aria-describedby")).toBe("prop-max-error");
+    expect(store.selectedWidget?.props.max).toBe(100);
+
+    await wrapper.get('[data-testid="prop-max-input"]').setValue("120");
+    expect(wrapper.find('[data-testid="prop-max-error"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="prop-max-input"]').attributes("aria-invalid")).toBeUndefined();
+    expect(wrapper.get('[data-testid="prop-max-input"]').attributes("aria-describedby")).toBeUndefined();
+    expect(store.selectedWidget?.props.max).toBe(120);
+
+    await wrapper.get('[data-testid="prop-value-input"]').setValue("121");
+    expect(wrapper.get('[data-testid="prop-value-error"]').text()).toBe("Value must be between 0 and 120");
+    expect(wrapper.get('[data-testid="prop-value-error"]').attributes("role")).toBe("alert");
+    expect(wrapper.get('[data-testid="prop-value-input"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="prop-value-input"]').attributes("aria-describedby")).toBe("prop-value-error");
+    expect(store.selectedWidget?.props.value).toBe(0);
+
+    await wrapper.get('[data-testid="prop-value-input"]').setValue("80");
+    expect(wrapper.find('[data-testid="prop-value-error"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="prop-value-input"]').attributes("aria-invalid")).toBeUndefined();
+    expect(wrapper.get('[data-testid="prop-value-input"]').attributes("aria-describedby")).toBeUndefined();
+    expect(store.selectedWidget?.props.value).toBe(80);
   });
 
   it("edits chart values from the inspector and reflects them in canvas and code preview", async () => {
@@ -1965,6 +2325,45 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="layout-height-input"]').attributes("aria-describedby")).toBeUndefined();
   });
 
+  it("rejects fractional LVGL integer fields before updating ProjectDoc", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const store = useProjectStore();
+    const initialX = store.selectedWidget?.layout.x;
+
+    await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
+    await wrapper.get('[data-testid="layout-x-input"]').setValue("10.5");
+    expect(wrapper.get('[data-testid="layout-x-error"]').text()).toBe("X must be an integer");
+    expect(wrapper.get('[data-testid="layout-x-input"]').attributes("aria-invalid")).toBe("true");
+    expect(store.selectedWidget?.layout.x).toBe(initialX);
+
+    await wrapper.get('[data-testid="inspector-style-tab"]').trigger("click");
+    await wrapper.get('[data-testid="style-radius-input"]').setValue("4.5");
+    expect(wrapper.get('[data-testid="style-radius-error"]').text()).toBe("Radius must be an integer");
+    expect(wrapper.get('[data-testid="style-radius-input"]').attributes("aria-invalid")).toBe("true");
+    expect(store.selectedWidget?.style.radius).toBeUndefined();
+
+    await wrapper.get('[data-testid="widget-card-dropdown"]').trigger("click");
+    const initialSelected = store.selectedWidget?.props.selected;
+    await wrapper.get('[data-testid="prop-selected-input"]').setValue("0.5");
+    expect(wrapper.get('[data-testid="prop-selected-error"]').text()).toBe("Selected must be an integer");
+    expect(wrapper.get('[data-testid="prop-selected-input"]').attributes("aria-invalid")).toBe("true");
+    expect(store.selectedWidget?.props.selected).toBe(initialSelected);
+
+    await wrapper.get('[data-testid="layer-row-screen-root"]').trigger("click");
+    await wrapper.get('[data-testid="inspector-layout-tab"]').trigger("click");
+    const initialGap = store.selectedWidget?.layout.flex?.gap;
+    await wrapper.get('[data-testid="layout-gap-input"]').setValue("3.5");
+    expect(wrapper.get('[data-testid="layout-gap-error"]').text()).toBe("Gap must be an integer");
+    expect(wrapper.get('[data-testid="layout-gap-input"]').attributes("aria-invalid")).toBe("true");
+    expect(store.selectedWidget?.layout.flex?.gap).toBe(initialGap);
+
+    wrapper.unmount();
+  });
+
   it("rejects invalid style padding, radius and flex gap from the inspector", async () => {
     const wrapper = mount(EditorShell, {
       global: {
@@ -1980,6 +2379,20 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("aria-invalid")).toBe("true");
     expect(wrapper.get('[data-testid="style-radius-input"]').attributes("aria-describedby")).toBe("style-radius-error");
     expect(store.selectedWidget?.style.radius).toBeUndefined();
+
+    await wrapper.get('[data-testid="style-letter-space-input"]').setValue("-2");
+    expect(wrapper.get('[data-testid="style-letter-space-error"]').text()).toBe("Letter Space must be non-negative");
+    expect(wrapper.get('[data-testid="style-letter-space-error"]').attributes("role")).toBe("alert");
+    expect(wrapper.get('[data-testid="style-letter-space-input"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="style-letter-space-input"]').attributes("aria-describedby")).toBe("style-letter-space-error");
+    expect(store.selectedWidget?.style.letterSpace).toBeUndefined();
+
+    await wrapper.get('[data-testid="style-line-space-input"]').setValue("-3");
+    expect(wrapper.get('[data-testid="style-line-space-error"]').text()).toBe("Line Space must be non-negative");
+    expect(wrapper.get('[data-testid="style-line-space-error"]').attributes("role")).toBe("alert");
+    expect(wrapper.get('[data-testid="style-line-space-input"]').attributes("aria-invalid")).toBe("true");
+    expect(wrapper.get('[data-testid="style-line-space-input"]').attributes("aria-describedby")).toBe("style-line-space-error");
+    expect(store.selectedWidget?.style.lineSpace).toBeUndefined();
 
     await wrapper.get('[data-testid="style-padding-top-input"]').setValue("-4");
     expect(wrapper.get('[data-testid="style-padding-top-error"]').text()).toBe("Padding Top must be non-negative");
@@ -2163,18 +2576,18 @@ describe("EditorShell", () => {
     expect(widget.attributes("style")).toContain("left: 184px");
     expect(widget.attributes("style")).toContain("top: 115px");
     expect(wrapper.get(".artboard").attributes("style")).toContain("scale(2)");
-    expect(wrapper.get('[data-testid="snap-toggle"]').attributes("title")).toBe("Enable Snap");
-    expect(wrapper.get('[data-testid="snap-toggle"]').attributes("aria-label")).toBe("Enable Snap");
-    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("title")).toBe("Hide Grid");
-    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-label")).toBe("Hide Grid");
+    expect(wrapper.get('[data-testid="snap-toggle"]').attributes("title")).toBe("Enable snap");
+    expect(wrapper.get('[data-testid="snap-toggle"]').attributes("aria-label")).toBe("Enable snap");
+    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("title")).toBe("Hide grid");
+    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-label")).toBe("Hide grid");
     expect(wrapper.get('[data-testid="grid-toggle"]').classes()).toContain("active");
     expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-pressed")).toBe("true");
     expect(wrapper.get('[data-testid="snap-toggle"]').attributes("aria-pressed")).toBe("false");
     await wrapper.get('[data-testid="grid-toggle"]').trigger("click");
     expect(wrapper.get(".artboard").classes()).not.toContain("show-grid");
     expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-pressed")).toBe("false");
-    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("title")).toBe("Show Grid");
-    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-label")).toBe("Show Grid");
+    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("title")).toBe("Show grid");
+    expect(wrapper.get('[data-testid="grid-toggle"]').attributes("aria-label")).toBe("Show grid");
     wrapper.unmount();
   });
 
@@ -2809,7 +3222,7 @@ describe("EditorShell", () => {
                 width: 24,
                 height: 24,
                 sizeBytes: 12,
-                objectKey: "projects/project-watch-demo/assets/asset-1/icon_heart.png",
+                objectKey: "projects/project-1/assets/asset-1/icon_heart.png",
                 createdAt: "2026-05-08T00:00:00Z"
               }
             }),
@@ -3148,6 +3561,127 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="canvas-widget-image-1"] img').attributes("src")).toBe("blob:local-heart");
   });
 
+  it("uploads local resources and rewrites references before exporting a migrated cloud project", async () => {
+    signInForCloudSaves();
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:local-heart") });
+    const savedDocs: unknown[] = [];
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(projectCreateResponse("project-1"));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        savedDocs.push(JSON.parse(String(init.body)).doc);
+        return Promise.resolve(projectSaveResponse());
+      }
+      if (url === "/api/projects/project-1/assets" && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              asset: {
+                id: "asset-heart-cloud",
+                projectId: "project-1",
+                name: "heart.png",
+                kind: "image",
+                mimeType: "image/png",
+                width: 1,
+                height: 1,
+                sizeBytes: 3,
+                objectKey: "projects/project-1/assets/asset-heart-cloud/heart.png",
+                createdAt: "2026-05-08T00:00:00Z"
+              }
+            }),
+            { status: 201 }
+          )
+        );
+      }
+      if (url === "/api/projects/project-1/export/c" && init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({ jobId: "job-local-sync" }), { status: 202 }));
+      }
+      if (url === "/api/jobs/job-local-sync") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              job: job({
+                id: "job-local-sync",
+                status: "succeeded",
+                progress: 100,
+                logs: [{ time: "2026-05-08T00:00:01Z", level: "info", message: "Build completed successfully" }],
+                result: { downloadUrl: "/api/jobs/job-local-sync/download" }
+              })
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pinia = createPinia();
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const projectStore = useProjectStore(pinia);
+    const assetsStore = useAssetsStore(pinia);
+    projectStore.addWidgetFromCatalog("image", { x: 12, y: 16 });
+    const localAsset = assetsStore.importLocalAsset(projectStore.project.id, new File(["png"], "heart.png", { type: "image/png" }));
+    expect(localAsset).not.toBeNull();
+    projectStore.registerAsset(localAsset!);
+    projectStore.bindSelectedImageAsset(localAsset!.id);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="build-button"]').trigger("click");
+    await flushPromises();
+
+    const exportCallIndex = fetchMock.mock.calls.findIndex(([url]) => url === "/api/projects/project-1/export/c");
+    const uploadCallIndex = fetchMock.mock.calls.findIndex(([url]) => url === "/api/projects/project-1/assets");
+    const finalDoc = savedDocs.at(-1) as {
+      assets: Array<{ id: string; objectKey: string }>;
+      screens: Array<{ root: { children: Array<{ type: string; props: { assetId?: string } }> } }>;
+    };
+    const syncedImage = finalDoc.screens[0].root.children.find((child) => child.type === "image");
+    expect(uploadCallIndex).toBeGreaterThan(-1);
+    expect(exportCallIndex).toBeGreaterThan(uploadCallIndex);
+    expect(savedDocs).toHaveLength(2);
+    expect(finalDoc.assets).toContainEqual(expect.objectContaining({ id: "asset-heart-cloud" }));
+    expect(finalDoc.assets.some((asset) => asset.objectKey.startsWith("local://"))).toBe(false);
+    expect(syncedImage?.props.assetId).toBe("asset-heart-cloud");
+    expect(projectStore.project.assets.some((asset) => asset.id === localAsset!.id)).toBe(false);
+    expect(assetsStore.assets.some((asset) => asset.id === localAsset!.id)).toBe(false);
+    expect(wrapper.text()).toContain("Build completed successfully");
+  });
+
+  it("deletes a local-only resource without calling the asset API", async () => {
+    const pinia = createPinia();
+    const revokeObjectURL = vi.fn();
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn().mockReturnValue("blob:local-heart"), revokeObjectURL });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [pinia]
+      }
+    });
+    const assetsStore = useAssetsStore(pinia);
+    const projectStore = useProjectStore(pinia);
+    const asset = assetsStore.importLocalAsset(projectStore.project.id, new File(["png"], "heart.png", { type: "image/png" }));
+    expect(asset).not.toBeNull();
+    projectStore.registerAsset(asset!);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get(`[data-testid="delete-asset-${asset!.id}"]`).trigger("click");
+    await flushPromises();
+
+    expect(fetchMock).not.toHaveBeenCalledWith(`/api/projects/${projectStore.project.id}/assets/${asset!.id}`, expect.anything());
+    expect(projectStore.project.assets.some((item) => item.id === asset!.id)).toBe(false);
+    expect(assetsStore.assets.some((item) => item.id === asset!.id)).toBe(false);
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:local-heart");
+    expect(wrapper.find(`[data-testid="asset-card-${asset!.id}"]`).exists()).toBe(false);
+    expect(wrapper.get('[data-testid="status-activity"]').text()).toBe("Asset deleted: heart.png");
+  });
+
   it("selects a resource card and binds an image asset from the assets panel", async () => {
     const pinia = createPinia();
     const wrapper = mount(EditorShell, {
@@ -3256,7 +3790,6 @@ describe("EditorShell", () => {
     await flushPromises();
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("sign in before uploading assets");
     expect(wrapper.text()).toContain("Sign in before uploading assets");
     const assetError = wrapper.get(".asset-error");
     expect(assetError.attributes("id")).toBe("asset-error");
@@ -3359,7 +3892,7 @@ describe("EditorShell", () => {
 
     await wrapper.get('[data-testid="widget-card-image"]').trigger("click");
     const store = useProjectStore(pinia);
-    store.bindSelectedImageAsset("asset-missing");
+    store.updateSelectedProps({ assetId: "asset-missing" });
     await wrapper.vm.$nextTick();
 
     expect(wrapper.get('[data-testid="image-binding-state"]').text()).toContain("Selected image asset is missing");
@@ -3367,6 +3900,7 @@ describe("EditorShell", () => {
 
   it("deletes an asset from the assets panel and ProjectDoc", async () => {
     signInForCloudSaves();
+    const savedDocs: unknown[] = [];
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url === "/api/projects" && init?.method === "POST") {
         return Promise.resolve(projectCreateResponse());
@@ -3378,6 +3912,7 @@ describe("EditorShell", () => {
         return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }));
       }
       if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        savedDocs.push(JSON.parse(String(init.body)).doc);
         return Promise.resolve(projectSaveResponse());
       }
       return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
@@ -3398,10 +3933,22 @@ describe("EditorShell", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("icon_heart.png");
     expect(wrapper.get('[data-testid="status-activity"]').text()).toBe("Asset uploaded: icon_heart.png");
+    fetchMock.mockClear();
+    savedDocs.length = 0;
 
     await wrapper.get('[data-testid="delete-asset-asset-1"]').trigger("click");
     await flushPromises();
 
+    const deleteCallIndex = fetchMock.mock.calls.findIndex(([url, init]) =>
+      url === "/api/projects/project-1/assets/asset-1" && init?.method === "DELETE"
+    );
+    const saveBeforeDelete = [...fetchMock.mock.calls]
+      .slice(0, deleteCallIndex)
+      .reverse()
+      .find(([url, init]) => url === "/api/projects/project-1/doc" && init?.method === "PUT");
+    const savedBeforeDeleteDoc = JSON.parse(String(saveBeforeDelete?.[1]?.body)).doc as { assets: unknown[] };
+    expect(savedBeforeDeleteDoc.assets).toEqual([]);
+    expect(savedDocs.at(-1)).toMatchObject({ assets: [] });
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/assets/asset-1", expect.objectContaining({ method: "DELETE" }));
     expect(wrapper.find('[data-testid="asset-card-asset-1"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="status-activity"]').text()).toBe("Asset deleted: icon_heart.png");
@@ -3457,7 +4004,7 @@ describe("EditorShell", () => {
     expect(assetDeleteConfirm.attributes("aria-labelledby")).toBe("asset-delete-confirm-title");
     expect(assetDeleteConfirm.attributes("aria-describedby")).toBe("asset-delete-confirm-description");
     expect(wrapper.get("#asset-delete-confirm-title").text()).toBe("Delete referenced asset?");
-    expect(wrapper.get("#asset-delete-confirm-description").text()).toContain("Deleting it will clear those image references.");
+    expect(wrapper.get("#asset-delete-confirm-description").text()).toContain("Deleting it will clear those resource references.");
     expect(wrapper.get("#asset-delete-confirm-description").attributes("role")).toBe("alert");
     expect(document.activeElement).toBe(wrapper.get('[data-testid="cancel-delete-asset-button"]').element);
     expect(wrapper.get('[data-testid="cancel-delete-asset-button"]').attributes("type")).toBe("button");
@@ -3570,6 +4117,52 @@ describe("EditorShell", () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="asset-delete-confirm"]').text()).toContain("watch_digits.ttf");
+    expect(wrapper.get("#asset-delete-confirm-description").text()).toContain("resource reference");
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/projects/project-1/assets/font-1", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("counts reusable style font asset usage and confirms before deleting the font", async () => {
+    signInForCloudSaves();
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(projectCreateResponse());
+      }
+      if (url === "/api/projects/project-1/assets" && init?.method === "POST") {
+        return Promise.resolve(fontAssetUploadResponse());
+      }
+      if (url === "/api/projects/project-1/assets/font-1" && init?.method === "DELETE") {
+        return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        return Promise.resolve(projectSaveResponse());
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const input = wrapper.get('[data-testid="asset-file-input"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["font"], "watch_digits.ttf", { type: "font/ttf" })]
+    });
+    await input.trigger("change");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="settings-nav-button"]').trigger("click");
+    await wrapper.get('[data-testid="add-project-style-button"]').trigger("click");
+    await wrapper.get('[data-testid="project-style-font-select"]').setValue("font-1");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="asset-usage-font-1"]').text()).toBe("Used 1");
+
+    await wrapper.get('[data-testid="delete-asset-font-1"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="asset-delete-confirm"]').text()).toContain("watch_digits.ttf");
+    expect(wrapper.get("#asset-delete-confirm-description").text()).toContain("resource reference");
     expect(fetchMock).not.toHaveBeenCalledWith("/api/projects/project-1/assets/font-1", expect.objectContaining({ method: "DELETE" }));
   });
 
@@ -3613,6 +4206,49 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="delete-asset-asset-1"]').trigger("click");
     await flushPromises();
     await wrapper.get('[data-testid="confirm-delete-asset-button"]').trigger("click");
+    await flushPromises();
+
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/projects/project-1/assets/asset-1", expect.objectContaining({ method: "DELETE" }));
+    expect(wrapper.text()).toContain("icon_heart.png");
+    expect(wrapper.text()).toContain("Save failed");
+  });
+
+  it("does not delete an unreferenced asset when removing it from ProjectDoc cannot be saved", async () => {
+    signInForCloudSaves();
+    let saveCount = 0;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/projects" && init?.method === "POST") {
+        return Promise.resolve(projectCreateResponse());
+      }
+      if (url === "/api/projects/project-1/assets" && init?.method === "POST") {
+        return Promise.resolve(assetUploadResponse());
+      }
+      if (url === "/api/projects/project-1/assets/asset-1" && init?.method === "DELETE") {
+        return Promise.resolve(new Response(JSON.stringify({ deleted: true }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-1/doc" && init?.method === "PUT") {
+        saveCount += 1;
+        if (saveCount === 1) {
+          return Promise.resolve(projectSaveResponse());
+        }
+        return Promise.resolve(new Response(JSON.stringify({ error: { code: "SAVE_FAILED", message: "save failed" } }), { status: 500 }));
+      }
+      return Promise.reject(new Error(`unexpected request ${init?.method ?? "GET"} ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const input = wrapper.get('[data-testid="asset-file-input"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["png"], "icon_heart.png", { type: "image/png" })]
+    });
+    await input.trigger("change");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="delete-asset-asset-1"]').trigger("click");
     await flushPromises();
 
     expect(fetchMock).not.toHaveBeenCalledWith("/api/projects/project-1/assets/asset-1", expect.objectContaining({ method: "DELETE" }));
@@ -4139,7 +4775,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="toolbar-menu-button"]').trigger("click");
 
     expect(wrapper.get('[data-testid="toolbar-project-menu"]').attributes("role")).toBe("menu");
-    expect(wrapper.get('[data-testid="menu-project-count"]').text()).toBe("0 cloud");
+    expect(wrapper.get('[data-testid="menu-project-count"]').text()).toBe("0 cloud projects");
     expect(wrapper.get('[data-testid="menu-project-empty-state"]').text()).toContain("No cloud projects loaded");
     expect(wrapper.get('[data-testid="menu-project-empty-state"]').attributes("role")).toBe("status");
     expect(wrapper.get('[data-testid="menu-project-empty-state"]').attributes("aria-live")).toBe("polite");
@@ -4217,12 +4853,12 @@ describe("EditorShell", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ projects: [{ id: "project-2", name: "Factory Panel" }] }),
+          JSON.stringify({ projects: [apiProject("project-2", "Factory Panel", openedDoc)] }),
           { status: 200 }
         )
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ project: { id: "project-2", name: "Factory Panel", doc: openedDoc } }), {
+        new Response(JSON.stringify({ project: apiProject("project-2", "Factory Panel", openedDoc) }), {
           status: 200
         })
       )
@@ -4512,6 +5148,27 @@ describe("EditorShell", () => {
     wrapper.unmount();
   });
 
+  it("logs unavailable feedback when simulator screenshot capture throws", async () => {
+    const wrapper = mount(EditorShell, {
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    await flushPromises();
+    const canvas = wrapper.get('[data-testid="simulator-canvas"]').element as HTMLCanvasElement;
+    vi.spyOn(canvas, "toDataURL").mockImplementation(() => {
+      throw new Error("canvas is tainted");
+    });
+
+    await wrapper.get('[data-testid="simulator-screenshot-button"]').trigger("click");
+
+    expect(wrapper.find('[data-testid="simulator-screenshot-link"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="status-activity"]').text()).toBe("Simulator screenshot unavailable");
+
+    wrapper.unmount();
+  });
+
   it("collapses and resizes the bottom dock without losing the dock panels", async () => {
     const wrapper = mount(EditorShell, {
       attachTo: document.body,
@@ -4630,7 +5287,7 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="simulator-runtime-kind"]').attributes("title")).toBe("模拟器运行时：画布回退");
   });
 
-  it("writes simulator render failures to the log", async () => {
+  it("shows a missing preview placeholder for image assets without preview content", async () => {
     signInForCloudSaves();
     const brokenDoc = {
       schemaVersion: 1,
@@ -4665,14 +5322,25 @@ describe("EditorShell", () => {
           hidden: false
         }
       }],
-      assets: [],
+      assets: [{
+        id: "missing-asset",
+        projectId: "project-broken",
+        name: "missing.png",
+        kind: "image",
+        mimeType: "image/png",
+        width: 96,
+        height: 96,
+        sizeBytes: 128,
+        objectKey: "projects/project-broken/assets/missing-asset/missing.png",
+        createdAt: "2026-05-08T00:00:00Z"
+      }],
       styles: [],
       events: [],
       updatedAt: "2026-05-08T00:00:00Z"
     };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ project: { id: "project-broken", name: "Broken Image UI", doc: brokenDoc } }), {
+        new Response(JSON.stringify({ project: apiProject("project-broken", "Broken Image UI", brokenDoc) }), {
           status: 201
         })
       )
@@ -4688,7 +5356,7 @@ describe("EditorShell", () => {
     await wrapper.get('[data-testid="confirm-new-project-button"]').trigger("submit");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Missing asset: missing-asset");
+    expect(wrapper.text()).toContain("Missing preview missing.png");
   });
 
   it("creates a cloud project from the toolbar", async () => {
@@ -4722,7 +5390,7 @@ describe("EditorShell", () => {
     };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ project: { id: "project-2", name: "Factory Panel", doc: returnedDoc } }), { status: 201 })
+        new Response(JSON.stringify({ project: apiProject("project-2", "Factory Panel", returnedDoc) }), { status: 201 })
       )
       .mockResolvedValueOnce(new Response(JSON.stringify({ assets: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -5021,16 +5689,16 @@ describe("EditorShell", () => {
         new Response(
           JSON.stringify({
             projects: [
-              { id: "project-watch-demo", name: "My Watch UI" },
-              { id: "project-same-name", name: "My Watch UI" },
-              { id: "project-2", name: "Factory Panel" }
+              apiProject("project-watch-demo", "My Watch UI", apiProjectDoc("project-watch-demo", "My Watch UI")),
+              apiProject("project-same-name", "My Watch UI", apiProjectDoc("project-same-name", "My Watch UI")),
+              apiProject("project-2", "Factory Panel", openedDoc)
             ]
           }),
           { status: 200 }
         )
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ project: { id: "project-2", name: "Factory Panel", doc: openedDoc } }), {
+        new Response(JSON.stringify({ project: apiProject("project-2", "Factory Panel", openedDoc) }), {
           status: 200
         })
       )
@@ -5049,7 +5717,7 @@ describe("EditorShell", () => {
     const options = wrapper.findAll('[data-testid="project-select"] option').map((option) => option.text());
     expect(options).toEqual(["My Watch UI (tch-demo)", "My Watch UI (ame-name)", "Factory Panel"]);
     await wrapper.get('[data-testid="toolbar-menu-button"]').trigger("click");
-    expect(wrapper.get('[data-testid="menu-project-count"]').text()).toBe("2 cloud");
+    expect(wrapper.get('[data-testid="menu-project-count"]').text()).toBe("2 cloud projects");
     expect(wrapper.get('[data-testid="menu-project-select"]').attributes("disabled")).toBeUndefined();
     expect(wrapper.find('[data-testid="menu-project-empty-state"]').exists()).toBe(false);
     await wrapper.get('[data-testid="project-select"]').setValue("project-2");
@@ -5058,6 +5726,66 @@ describe("EditorShell", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/projects", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-2", expect.any(Object));
     expect(wrapper.text()).toContain("Factory Panel");
+  });
+
+  it("does not load assets for a stale cloud project open request", async () => {
+    signInForCloudSaves();
+    let resolveProjectOne: (response: Response) => void = () => undefined;
+    let resolveProjectTwo: (response: Response) => void = () => undefined;
+    const projectOneResponse = new Promise<Response>((resolve) => {
+      resolveProjectOne = resolve;
+    });
+    const projectTwoResponse = new Promise<Response>((resolve) => {
+      resolveProjectTwo = resolve;
+    });
+    const projectOneDoc = apiProjectDoc("project-1", "Project One");
+    const projectTwoDoc = apiProjectDoc("project-2", "Project Two");
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "/api/projects") {
+        return Promise.resolve(new Response(JSON.stringify({
+          projects: [
+            apiProject("project-1", "Project One", projectOneDoc),
+            apiProject("project-2", "Project Two", projectTwoDoc)
+          ]
+        }), { status: 200 }));
+      }
+      if (url === "/api/projects/project-1") {
+        return projectOneResponse;
+      }
+      if (url === "/api/projects/project-2") {
+        return projectTwoResponse;
+      }
+      if (url === "/api/projects/project-1/assets" || url === "/api/projects/project-2/assets") {
+        return Promise.resolve(new Response(JSON.stringify({ assets: [] }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected request ${url}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    await wrapper.get('[data-testid="load-projects-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="project-select"]').setValue("project-1");
+    await flushPromises();
+    await wrapper.get('[data-testid="project-select"]').setValue("project-2");
+    await flushPromises();
+
+    resolveProjectTwo(new Response(JSON.stringify({
+      project: apiProject("project-2", "Project Two", projectTwoDoc)
+    }), { status: 200 }));
+    await flushPromises();
+    resolveProjectOne(new Response(JSON.stringify({
+      project: apiProject("project-1", "Project One", projectOneDoc)
+    }), { status: 200 }));
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Project Two");
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/projects/project-2/assets")).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/projects/project-1/assets")).toBe(false);
   });
 
   it("hides widgets from canvas and locks layout edits from the layers panel", async () => {
@@ -5202,6 +5930,124 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="settings-target-dpi-input"]').attributes("aria-describedby")).toBe("settings-target-dpi-error");
     expect(store.project.target.height).toBe(480);
     expect(store.project.target.dpi).toBe(240);
+
+    await wrapper.get('[data-testid="target-width-input"]').setValue("320.5");
+    await wrapper.get('[data-testid="settings-target-dpi-input"]').setValue("160.5");
+
+    expect(wrapper.get('[data-testid="target-width-error"]').text()).toBe("Width must be an integer");
+    expect(wrapper.get('[data-testid="settings-target-dpi-error"]').text()).toBe("DPI must be an integer");
+    expect(store.project.target.width).toBe(320);
+    expect(store.project.target.dpi).toBe(240);
+  });
+
+  it("lets project settings create edit and apply reusable styles", async () => {
+    const wrapper = mount(EditorShell, {
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+    const store = useProjectStore();
+
+    await wrapper.get('[data-testid="settings-nav-button"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="project-styles-empty"]').text()).toBe("No reusable styles yet.");
+    await wrapper.get('[data-testid="add-project-style-button"]').trigger("click");
+
+    const styleId = store.project.styles[0]?.id;
+    expect(styleId).toBeTruthy();
+    expect(wrapper.get('[data-testid="project-style-name-input"]').attributes("aria-label")).toBe("Reusable style name");
+    expect((wrapper.get('[data-testid="project-style-name-input"]').element as HTMLInputElement).value).toBe("Style_1");
+
+    await wrapper.get('[data-testid="project-style-name-input"]').setValue("Primary Metric");
+    const initialProjectStyleBg = store.project.styles[0]?.style.bgColor;
+    await wrapper.get('[data-testid="project-style-bg-color-input"]').setValue("red");
+    expect(store.project.styles[0]?.style.bgColor).toBe(initialProjectStyleBg);
+    expect(wrapper.get('[data-testid="project-style-bg-color-error"]').text()).toBe("Background color must be a 3 or 6 digit hex color");
+    expect(wrapper.get('[data-testid="project-style-bg-color-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-bg-color-input"]').setValue("#123456");
+    expect(wrapper.find('[data-testid="project-style-bg-color-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-text-color-input"]').setValue("#F8FAFC");
+    await wrapper.get('[data-testid="project-style-border-color-input"]').setValue("#C084FC");
+    await wrapper.get('[data-testid="project-style-font-select"]').setValue("lv_font_montserrat_32");
+    await wrapper.get('[data-testid="project-style-align-select"]').setValue("right");
+    await wrapper.get('[data-testid="project-style-radius-input"]').setValue("-1");
+    expect(store.project.styles[0]?.style.radius).not.toBe(-1);
+    expect(wrapper.get('[data-testid="project-style-radius-error"]').text()).toBe("Radius must be non-negative");
+    expect(wrapper.get('[data-testid="project-style-radius-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-radius-input"]').setValue("16");
+    expect(wrapper.find('[data-testid="project-style-radius-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-opacity-input"]').setValue("120");
+    expect(store.project.styles[0]?.style.opacity).not.toBe(120);
+    expect(wrapper.get('[data-testid="project-style-opacity-error"]').text()).toBe("Opacity must be between 0 and 100");
+    expect(wrapper.get('[data-testid="project-style-opacity-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-opacity-input"]').setValue("80");
+    expect(wrapper.find('[data-testid="project-style-opacity-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-letter-space-input"]').setValue("-2");
+    expect(store.project.styles[0]?.style.letterSpace).not.toBe(-2);
+    expect(wrapper.get('[data-testid="project-style-letter-space-error"]').text()).toBe("Letter Space must be non-negative");
+    expect(wrapper.get('[data-testid="project-style-letter-space-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-letter-space-input"]').setValue("2");
+    expect(wrapper.find('[data-testid="project-style-letter-space-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-line-space-input"]').setValue("-4");
+    expect(store.project.styles[0]?.style.lineSpace).not.toBe(-4);
+    expect(wrapper.get('[data-testid="project-style-line-space-error"]').text()).toBe("Line Space must be non-negative");
+    expect(wrapper.get('[data-testid="project-style-line-space-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-line-space-input"]').setValue("4");
+    expect(wrapper.find('[data-testid="project-style-line-space-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-padding-top-input"]').setValue("-6");
+    expect(store.project.styles[0]?.style.padding?.top).not.toBe(-6);
+    expect(wrapper.get('[data-testid="project-style-padding-top-error"]').text()).toBe("Padding Top must be non-negative");
+    expect(wrapper.get('[data-testid="project-style-padding-top-input"]').attributes("aria-invalid")).toBe("true");
+
+    await wrapper.get('[data-testid="project-style-padding-top-input"]').setValue("6");
+    expect(wrapper.find('[data-testid="project-style-padding-top-error"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="project-style-padding-right-input"]').setValue("8");
+    await wrapper.get('[data-testid="project-style-padding-bottom-input"]').setValue("10");
+    await wrapper.get('[data-testid="project-style-padding-left-input"]').setValue("12");
+    await wrapper.get('[data-testid="apply-project-style-button"]').trigger("click");
+
+    expect(store.project.styles[0]).toMatchObject({
+      name: "Primary Metric",
+      style: {
+        bgColor: "#123456",
+        textColor: "#F8FAFC",
+        borderColor: "#C084FC",
+        font: "lv_font_montserrat_32",
+        align: "right",
+        opacity: 80,
+        radius: 16,
+        letterSpace: 2,
+        lineSpace: 4,
+        padding: { top: 6, right: 8, bottom: 10, left: 12 }
+      }
+    });
+    expect(store.selectedWidget?.style).toMatchObject({
+      bgColor: "#123456",
+      textColor: "#F8FAFC",
+      borderColor: "#C084FC",
+      font: "lv_font_montserrat_32",
+      align: "right",
+      opacity: 80,
+      radius: 16,
+      letterSpace: 2,
+      lineSpace: 4,
+      padding: { top: 6, right: 8, bottom: 10, left: 12 }
+    });
+    await wrapper.get('[data-testid="settings-back-to-canvas-button"]').trigger("click");
+    expect(wrapper.get('[data-testid="canvas-widget-time-label"]').attributes("style")).toContain("font-size: 32px");
+    expect(wrapper.get('[data-testid="canvas-widget-time-label"]').attributes("style")).toContain("text-align: right");
+    expect(wrapper.get('[data-testid="canvas-widget-time-label"]').attributes("style")).toContain("letter-spacing: 2px");
+    expect(wrapper.get('[data-testid="canvas-widget-time-label"]').attributes("style")).toContain("padding: 6px 8px 10px 12px");
+
+    await wrapper.get('[data-testid="settings-nav-button"]').trigger("click");
+    await wrapper.get('[data-testid="delete-project-style-button"]').trigger("click");
+    expect(store.project.styles).toHaveLength(0);
+    expect(wrapper.get('[data-testid="project-styles-empty"]').text()).toBe("No reusable styles yet.");
   });
 
   it("shows target device name validation errors without changing ProjectDoc", async () => {

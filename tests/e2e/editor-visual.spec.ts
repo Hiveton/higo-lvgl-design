@@ -1,10 +1,21 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createDefaultProjectDoc } from "@hiveton-lvgl/schema";
 
 const visualViewports = [
   { width: 1280, height: 800 },
   { width: 1440, height: 900 },
   { width: 1920, height: 1080 }
 ];
+
+const apiTimestamp = "2026-05-08T00:00:00Z";
+
+function apiProjectDoc(id: string, name: string) {
+  return createDefaultProjectDoc({
+    id,
+    name,
+    updatedAt: apiTimestamp
+  });
+}
 
 function rgbChannel(value: string, index: number): number {
   const match = value.match(/rgba?\(([^)]+)\)/);
@@ -874,8 +885,9 @@ async function mockApi(page: Page): Promise<void> {
         project: {
           id: "project-visual-1",
           name: "My Watch UI",
-          updatedAt: "2026-05-08T00:00:00Z",
-          doc: {}
+          createdAt: apiTimestamp,
+          updatedAt: apiTimestamp,
+          doc: apiProjectDoc("project-visual-1", "My Watch UI")
         }
       })
     });
@@ -896,9 +908,11 @@ async function mockApi(page: Page): Promise<void> {
       body: JSON.stringify({
         job: {
           id: "visual-job-1",
+          kind: "export_c",
           status: "succeeded",
+          progress: 100,
           logs: [
-            { time: "2026-05-08T00:00:00Z", level: "info", message: "Build started" },
+            { time: apiTimestamp, level: "info", message: "Build started" },
             { time: "2026-05-08T00:00:01Z", level: "info", message: "Generating code" },
             { time: "2026-05-08T00:00:02Z", level: "info", message: "Build completed successfully" }
           ],
@@ -911,10 +925,11 @@ async function mockApi(page: Page): Promise<void> {
   });
 
   await page.route("**/api/projects/*/doc", async (route) => {
+    const projectId = new URL(route.request().url()).pathname.match(/\/api\/projects\/([^/]+)\/doc$/)?.[1] ?? "project-visual-1";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ projectId: "project-watch-demo", updatedAt: "2026-05-08T00:00:00Z" })
+      body: JSON.stringify({ projectId, updatedAt: "2026-05-08T00:00:00Z" })
     });
   });
 }
