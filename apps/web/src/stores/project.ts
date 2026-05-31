@@ -42,6 +42,7 @@ import {
 } from "../api/projects";
 import { getAuthToken, getBrowserStorage } from "../api/auth";
 import { localizedErrorForCode, localizeError } from "../i18n/errors";
+import { createEditorUUID, collectWidgetIds, collectNames, collectExistingWidgetNames } from "../utils";
 import { useClipboardStore } from "./clipboard";
 import { useHistoryStore } from "./history";
 import { useLocaleStore } from "./locale";
@@ -157,7 +158,7 @@ export const useProjectStore = defineStore("project", () => {
       : source.parentId ?? screen.root.id;
     const parent = findWidgetById(project.value, parentId);
     const targetParentId = parent && !parent.locked ? parentId : screen.root.id;
-    const names = collectExistingWidgetNames(project.value);
+    const names = collectExistingWidgetNames(project.value.screens.map(s => s.root));
     const nextWidget = cloneWidgetForPaste(source, targetParentId, names, { count: 1 });
     const clonedEvents = clonedEventBindingsFor(source, nextWidget, clipboard.events);
 
@@ -205,7 +206,7 @@ export const useProjectStore = defineStore("project", () => {
       return;
     }
     const parentId = source.parentId ?? screen.root.id;
-    const names = collectExistingWidgetNames(project.value);
+    const names = collectExistingWidgetNames(project.value.screens.map(s => s.root));
     const nextWidget = cloneWidgetForPaste(source, parentId, names, { count: 1 });
     const clonedEvents = clonedEventBindingsFor(source, nextWidget);
 
@@ -1256,20 +1257,8 @@ function uniqueProjectStyleName(doc: ProjectDoc, preferredName: string, currentS
   return candidate;
 }
 
-function createEditorUUID(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === "function") {
-    return randomUUID.call(globalThis.crypto);
-  }
-  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (character) => {
-    const random = Math.trunc(Math.random() * 16);
-    const value = Number(character) ^ (random & (15 >> (Number(character) / 4)));
-    return value.toString(16);
-  });
-}
-
 function uniqueWidgetNameForRename(doc: ProjectDoc, widgetId: string, name: string): string {
-  const existing = collectExistingWidgetNames(doc);
+  const existing = collectExistingWidgetNames(doc.screens.map(s => s.root));
   const current = findWidgetById(doc, widgetId);
   if (current) {
     existing.delete(current.name);
@@ -1286,21 +1275,6 @@ function uniqueWidgetNameForRename(doc: ProjectDoc, widgetId: string, name: stri
   return candidate;
 }
 
-function collectExistingWidgetNames(doc: ProjectDoc): Set<string> {
-  const names = new Set<string>();
-  for (const screen of doc.screens) {
-    collectNames(screen.root, names);
-  }
-  return names;
-}
-
-function collectNames(widget: WidgetNode, names: Set<string>): void {
-  names.add(widget.name);
-  for (const child of widget.children) {
-    collectNames(child, names);
-  }
-}
-
 function findChildIndex(doc: ProjectDoc, parentId: string, childId: string): number | undefined {
   const parent = findWidgetById(doc, parentId);
   const index = parent?.children.findIndex((child) => child.id === childId) ?? -1;
@@ -1313,16 +1287,6 @@ function cloneWidgetTree(widget: WidgetNode): WidgetNode {
 
 function cloneWidgetStyle(style: WidgetStyle): WidgetStyle {
   return JSON.parse(JSON.stringify(style)) as WidgetStyle;
-}
-
-function collectWidgetIds(widget: WidgetNode): Set<string> {
-  const ids = new Set<string>([widget.id]);
-  for (const child of widget.children) {
-    for (const childId of collectWidgetIds(child)) {
-      ids.add(childId);
-    }
-  }
-  return ids;
 }
 
 function cloneWidgetForPaste(

@@ -1,4 +1,5 @@
 import type { EventBinding, LayoutBox, ProjectDoc, WidgetNode, WidgetPropValue, WidgetStyle } from "@hiveton-lvgl/schema";
+import { collectWidgetIds } from "../utils";
 
 export type EditorCommand = {
   id: string;
@@ -884,16 +885,6 @@ function findWidgetInTree(widget: WidgetNode, widgetId: string): WidgetNode | nu
 
 function isWidgetDescendant(widget: WidgetNode, widgetId: string): boolean {
   return widget.children.some((child) => child.id === widgetId || isWidgetDescendant(child, widgetId));
-}
-
-function collectWidgetIds(widget: WidgetNode): Set<string> {
-  const ids = new Set<string>([widget.id]);
-  for (const child of widget.children) {
-    for (const childId of collectWidgetIds(child)) {
-      ids.add(childId);
-    }
-  }
-  return ids;
 }
 
 function findWidgetLocation(doc: ProjectDoc, widgetId: string): WidgetLocation | null {

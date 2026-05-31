@@ -12,6 +12,7 @@ import {
   updateWidgetProps,
   updateWidgetStyle
 } from "../commands/editorCommands";
+import { createEditorUUID, collectExistingWidgetNames } from "../utils";
 import { useProjectStore } from "./project";
 import { useSelectionStore } from "./selection";
 
@@ -128,18 +129,6 @@ export const useWidgetStore = defineStore("widget", () => {
   };
 });
 
-function createEditorUUID(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === "function") {
-    return randomUUID.call(globalThis.crypto);
-  }
-  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (character) => {
-    const random = Math.trunc(Math.random() * 16);
-    const value = Number(character) ^ (random & (15 >> (Number(character) / 4)));
-    return value.toString(16);
-  });
-}
-
 function defaultPropsFor(type: Exclude<WidgetType, "screen">): Record<string, WidgetPropValue> {
   if (type === "label") {
     return { text: "Label" };
@@ -169,7 +158,7 @@ function defaultPropsFor(type: Exclude<WidgetType, "screen">): Record<string, Wi
 }
 
 function nextWidgetName(doc: { screens: Array<{ root: WidgetNode }> }, label: string): string {
-  const existing = collectExistingWidgetNames(doc);
+  const existing = collectExistingWidgetNames(doc.screens.map(s => s.root));
   let index = 1;
   let candidate = `${label}_${index}`;
   while (existing.has(candidate)) {
@@ -177,19 +166,4 @@ function nextWidgetName(doc: { screens: Array<{ root: WidgetNode }> }, label: st
     candidate = `${label}_${index}`;
   }
   return candidate;
-}
-
-function collectExistingWidgetNames(doc: { screens: Array<{ root: WidgetNode }> }): Set<string> {
-  const names = new Set<string>();
-  for (const screen of doc.screens) {
-    collectNames(screen.root, names);
-  }
-  return names;
-}
-
-function collectNames(widget: WidgetNode, names: Set<string>): void {
-  names.add(widget.name);
-  for (const child of widget.children) {
-    collectNames(child, names);
-  }
 }

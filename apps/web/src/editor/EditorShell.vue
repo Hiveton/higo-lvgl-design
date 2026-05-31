@@ -34,7 +34,7 @@
       @redo="projectStore.redo"
       @save-project="saveProjectWithLog"
       @show-settings="activateNav('settings')"
-      @toggle-simulator="toggleSimulatorPanel"
+      @toggle-simulator="toggleSimulatorPanelWithLog"
       @undo="projectStore.undo"
       @update-theme="projectStore.updateTheme"
     />
@@ -189,8 +189,8 @@
         aria-orientation="horizontal"
         :aria-label="copy.bottomDock.resize"
         :title="copy.bottomDock.resize"
-        aria-valuemin="180"
-        aria-valuemax="420"
+        :aria-valuemin="BOTTOM_DOCK_MIN_HEIGHT"
+        :aria-valuemax="BOTTOM_DOCK_MAX_HEIGHT"
         :aria-valuenow="bottomDockEffectiveHeight"
         :aria-valuetext="bottomDockHeightValueText"
         @mousedown="startBottomDockResize"
@@ -227,11 +227,11 @@
         :status="simulatorStatus"
         :runtime-kind="simulatorRuntimeKind"
         :message="simulatorMessage"
-        @fullscreen="requestSimulatorFullscreen"
-        @mounted="handleSimulatorCanvasMounted"
-        @refresh="refreshSimulatorPanel"
-        @screenshot="captureSimulatorScreenshot"
-        @toggle-background="toggleSimulatorBackground"
+        @fullscreen="requestSimulatorFullscreenWithLog"
+        @mounted="handleSimulatorCanvasMountedWithLog"
+        @refresh="refreshSimulatorPanelWithLog"
+        @screenshot="captureSimulatorScreenshotWithLog"
+        @toggle-background="toggleSimulatorBackgroundWithLog"
       />
     </section>
 
@@ -352,7 +352,6 @@ let activeEditorShellToken = 0;
 <script setup lang="ts">
 import { widgetCatalog, type AssetRef, type EventBinding, type LayoutBox, type ProjectDoc, type WidgetNode } from "@hiveton-lvgl/schema";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { loadRuntime, SimulatorRuntimeError, type LvglRuntime } from "@hiveton-lvgl/lvgl-wasm-runtime";
 import { getAuthToken } from "../api/auth";
 import { downloadJobResult } from "../api/jobs";
 import { localizedErrorForCode, localizeError } from "../i18n/errors";
@@ -384,6 +383,18 @@ import StatusBar from "./StatusBar.vue";
 import { toTestId } from "./testId";
 import TopToolbar from "./TopToolbar.vue";
 import WidgetPalette from "./WidgetPalette.vue";
+
+// 底部面板高度限制
+const BOTTOM_DOCK_MIN_HEIGHT = 180;
+const BOTTOM_DOCK_MAX_HEIGHT = 420;
+const BOTTOM_DOCK_DEFAULT_HEIGHT = 248;
+const BOTTOM_DOCK_ASSETS_HEIGHT = 376;
+
+// 定时器延迟
+const AUTOSAVE_DELAY = 800;
+const SIMULATOR_RENDER_DELAY = 500;
+const CLIPBOARD_TIMEOUT = 1200;
+const OBJECT_URL_CLEANUP_DELAY = 1000;
 
 const projectStore = useProjectStore();
 const assetsStore = useAssetsStore();
@@ -439,6 +450,28 @@ const {
   isAssetReferenced, widgetTreeUsesAsset, isLocalAsset,
   imagePreviewUrlForWidget: imagePreviewUrl
 } = useAssetManagement(project, selectedWidgetForComposable);
+
+const {
+  simulatorVisible,
+  simulatorCanvas,
+  simulatorRuntime,
+  simulatorBackground,
+  simulatorScreenshotUrl,
+  simulatorStatus,
+  simulatorRuntimeKind,
+  simulatorMessage,
+  scheduleSimulatorRender,
+  renderSimulator,
+  mountSimulator,
+  toggleSimulatorPanel,
+  handleSimulatorCanvasMounted,
+  refreshSimulatorPanel,
+  captureSimulatorScreenshot,
+  toggleSimulatorBackground,
+  requestSimulatorFullscreen,
+  destroySimulator
+} = useSimulator(project, activeScreen, copy);
+
 const saveStateLabel = computed(() => {
   if (projectStore.saveState === "saving") {
     return copy.value.status.saving;
@@ -515,14 +548,9 @@ const latestActivityMessage = computed(() => {
 const eventType = ref<EventBinding["event"]>("LV_EVENT_CLICKED");
 const eventHandler = ref("on_time_clicked");
 const eventTargetWidgetId = ref("time-label");
-const simulatorCanvas = ref<HTMLCanvasElement | null>(null);
 const editorShellRef = ref<HTMLElement | null>(null);
 const artboardRef = ref<HTMLElement | null>(null);
-const simulatorRuntime = ref<LvglRuntime | null>(null);
 const autosaveTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-const simulatorRenderTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-let simulatorMountGeneration = 0;
-let simulatorMountInFlightGeneration: number | null = null;
 const activeCenterPanel = ref<"canvas" | "code" | "settings">("canvas");
 const activeNavItem = ref<SidebarNavItem>("widgets");
 const activeInspectorTab = ref<InspectorTab>("style");
@@ -534,12 +562,6 @@ const draggedLayerWidgetId = ref<string | null>(null);
 const inspectorErrors = ref<Record<string, string>>({});
 const exportDownloadUrl = computed(() => jobsStore.exportDownloadUrl);
 const buildStatus = computed(() => jobsStore.buildStatus);
-const simulatorStatus = computed(() => simulatorStore.status);
-const simulatorRuntimeKind = computed(() => simulatorStore.runtimeKind);
-const simulatorMessage = computed(() => simulatorStore.message);
-const simulatorVisible = ref(true);
-const simulatorBackground = ref<"dark" | "light">("dark");
-const simulatorScreenshotUrl = ref<string | null>(null);
 const previewOpen = ref(false);
 const previewReturnFocusElement = ref<HTMLElement | null>(null);
 const previewScreenshotUrl = ref<string | null>(null);
@@ -564,9 +586,8 @@ const newProjectConfirmLabel = computed(() => {
   return copy.value.dialogs.createProjectNamed(name);
 });
 const assetDeleteCancelButton = ref<HTMLButtonElement | null>(null);
-const simulatorWasmModuleUrl = import.meta.env.VITE_LVGL_WASM_MODULE_URL?.trim() || undefined;
 const bottomDockEffectiveHeight = computed(() =>
-  activeNavItem.value === "resources" && !bottomDockUserSized.value ? 376 : bottomDockHeight.value
+  activeNavItem.value === "resources" && !bottomDockUserSized.value ? BOTTOM_DOCK_ASSETS_HEIGHT : bottomDockHeight.value
 );
 const bottomDockStyle = computed(() => ({
   "--bottom-dock-height": bottomDockCollapsed.value ? "36px" : `${bottomDockEffectiveHeight.value}px`
@@ -592,7 +613,7 @@ const previewDeviceStyle = computed(() => ({
 }));
 
 const logEntries = ref([
-  { id: "log-editor-ready", time: "10:21:05", message: copy.value.status.editorReady }
+  { id: "log-editor-ready", time: new Date().toLocaleTimeString(), message: copy.value.status.editorReady }
 ]);
 
 onMounted(() => {
@@ -606,7 +627,6 @@ onBeforeUnmount(() => {
   if (activeEditorShellToken === editorShellToken) {
     activeEditorShellToken = 0;
   }
-  simulatorMountGeneration += 1;
   document.removeEventListener("keydown", handleKeydown, { capture: true });
   document.removeEventListener("keyup", handleKeyup, { capture: true });
   document.removeEventListener("mousemove", handleCanvasMouseMove);
@@ -616,10 +636,6 @@ onBeforeUnmount(() => {
   if (autosaveTimer.value) {
     clearTimeout(autosaveTimer.value);
   }
-  if (simulatorRenderTimer.value) {
-    clearTimeout(simulatorRenderTimer.value);
-  }
-  simulatorRuntime.value?.destroy();
 });
 
 watch(
@@ -668,7 +684,7 @@ function previewProject(): void {
   void syncPreviewRuntimeStatus(copy.value.runtime.previewLiveReady);
   logEntries.value.push({
     id: `log-preview-${logEntries.value.length}`,
-    time: "10:21:10",
+    time: new Date().toLocaleTimeString(),
     message: copy.value.runtime.previewUpdated
   });
 }
@@ -688,7 +704,7 @@ function refreshPreview(): void {
   previewStatusSequence.value += 1;
   previewStatusMessage.value = copy.value.runtime.previewRefreshed;
   void syncPreviewRuntimeStatus(copy.value.runtime.previewRefreshed);
-  appendLog(copy.value.runtime.previewUpdated, "10:21:10");
+  appendLog(copy.value.runtime.previewUpdated);
 }
 
 function handlePreviewInteraction(): void {
@@ -696,7 +712,7 @@ function handlePreviewInteraction(): void {
   previewStatusSequence.value += 1;
   previewScreenshotUrl.value = null;
   previewStatusMessage.value = copy.value.runtime.previewInteractionTemporary;
-  upsertLog("preview-interaction-temporary", "10:21:10", copy.value.runtime.previewInteractionTemporary);
+  upsertLog("preview-interaction-temporary", copy.value.runtime.previewInteractionTemporary);
 }
 
 function handlePreviewEvent(widgetId: string, eventName: EventBinding["event"]): void {
@@ -705,7 +721,7 @@ function handlePreviewEvent(widgetId: string, eventName: EventBinding["event"]):
     const message = copy.value.runtime.previewEventTriggered(binding.event, binding.handlerName);
     previewStatusSequence.value += 1;
     previewStatusMessage.value = message;
-    appendLog(message, "10:21:10");
+    appendLog(message);
   }
 }
 
@@ -732,45 +748,38 @@ function capturePreviewScreenshot(): void {
     previewStatusMessage.value = previewInteractionDirty.value
       ? copy.value.runtime.previewInteractionTemporary
       : (simulatorStore.lastError ?? copy.value.runtime.previewScreenshotUnavailable);
-    appendLog(previewStatusMessage.value, "10:21:10");
+    appendLog(previewStatusMessage.value);
     return;
   }
   const canvas = simulatorCanvas.value;
   if (!canvas || typeof canvas.toDataURL !== "function") {
     previewStatusMessage.value = copy.value.runtime.previewScreenshotUnavailable;
-    appendLog(copy.value.runtime.previewScreenshotUnavailable, "10:21:10");
+    appendLog(copy.value.runtime.previewScreenshotUnavailable);
     return;
   }
   const screenshotUrl = captureCanvasDataUrl(canvas);
   if (!screenshotUrl) {
     previewStatusMessage.value = copy.value.runtime.previewScreenshotUnavailable;
-    appendLog(copy.value.runtime.previewScreenshotUnavailable, "10:21:10");
+    appendLog(copy.value.runtime.previewScreenshotUnavailable);
     return;
   }
   previewScreenshotUrl.value = screenshotUrl;
   previewStatusMessage.value = copy.value.runtime.previewScreenshotReady;
-  appendLog(copy.value.runtime.previewScreenshotLogReady, "10:21:10");
+  appendLog(copy.value.runtime.previewScreenshotLogReady);
 }
 
-function refreshSimulatorPanel(): void {
-  simulatorScreenshotUrl.value = null;
-  void renderSimulator();
-  appendLog(copy.value.runtime.simulatorRefreshed, "10:21:10");
+function refreshSimulatorPanelWithLog(): void {
+  refreshSimulatorPanel();
+  appendLog(copy.value.runtime.simulatorRefreshed);
 }
 
-function captureSimulatorScreenshot(): void {
-  const canvas = simulatorCanvas.value;
-  if (!canvas || typeof canvas.toDataURL !== "function") {
-    appendLog(copy.value.runtime.simulatorScreenshotUnavailable, "10:21:10");
-    return;
+function captureSimulatorScreenshotWithLog(): void {
+  captureSimulatorScreenshot();
+  if (simulatorScreenshotUrl.value) {
+    appendLog(copy.value.runtime.simulatorScreenshotReady);
+  } else {
+    appendLog(copy.value.runtime.simulatorScreenshotUnavailable);
   }
-  const screenshotUrl = captureCanvasDataUrl(canvas);
-  if (!screenshotUrl) {
-    appendLog(copy.value.runtime.simulatorScreenshotUnavailable, "10:21:10");
-    return;
-  }
-  simulatorScreenshotUrl.value = screenshotUrl;
-  appendLog(copy.value.runtime.simulatorScreenshotReady, "10:21:10");
 }
 
 function captureCanvasDataUrl(canvas: HTMLCanvasElement): string | null {
@@ -781,39 +790,24 @@ function captureCanvasDataUrl(canvas: HTMLCanvasElement): string | null {
   }
 }
 
-function toggleSimulatorBackground(): void {
-  simulatorBackground.value = simulatorBackground.value === "dark" ? "light" : "dark";
-  appendLog(copy.value.runtime.simulatorBackground(simulatorBackground.value), "10:21:10");
+function toggleSimulatorBackgroundWithLog(): void {
+  toggleSimulatorBackground();
+  appendLog(copy.value.runtime.simulatorBackground(simulatorBackground.value));
 }
 
-async function requestSimulatorFullscreen(): Promise<void> {
-  const canvas = simulatorCanvas.value as (HTMLCanvasElement & { requestFullscreen?: () => Promise<void> }) | null;
-  if (!canvas?.requestFullscreen) {
-    appendLog(copy.value.runtime.simulatorFullscreenUnavailable, "10:21:10");
-    return;
-  }
-  try {
-    await canvas.requestFullscreen();
-    appendLog(copy.value.runtime.simulatorFullscreenOpened, "10:21:10");
-  } catch (error) {
-    appendLog(error instanceof Error ? copy.value.runtime.simulatorFullscreenFailedWithMessage(error.message) : copy.value.runtime.simulatorFullscreenFailed, "10:21:10");
-  }
+async function requestSimulatorFullscreenWithLog(): Promise<void> {
+  await requestSimulatorFullscreen();
+  appendLog(copy.value.runtime.simulatorFullscreenOpened);
 }
 
-function handleSimulatorCanvasMounted(canvas: HTMLCanvasElement): void {
-  simulatorMountGeneration += 1;
-  simulatorCanvas.value = canvas;
-  void mountSimulator();
+function handleSimulatorCanvasMountedWithLog(canvas: HTMLCanvasElement): void {
+  handleSimulatorCanvasMounted(canvas);
 }
 
-function toggleSimulatorPanel(): void {
-  simulatorVisible.value = !simulatorVisible.value;
+function toggleSimulatorPanelWithLog(): void {
+  toggleSimulatorPanel();
   if (!simulatorVisible.value) {
-    simulatorMountGeneration += 1;
-    simulatorRuntime.value?.destroy();
-    simulatorRuntime.value = null;
-    simulatorCanvas.value = null;
-    simulatorStore.markLoading(copy.value.runtime.simulatorHidden);
+    appendLog(copy.value.runtime.simulatorHidden);
   }
 }
 
@@ -834,7 +828,7 @@ function startBottomDockResize(event: MouseEvent): void {
 
 function setBottomDockHeight(height: number): void {
   bottomDockCollapsed.value = false;
-  bottomDockHeight.value = Math.min(420, Math.max(180, Math.round(height)));
+  bottomDockHeight.value = Math.min(BOTTOM_DOCK_MAX_HEIGHT, Math.max(BOTTOM_DOCK_MIN_HEIGHT, Math.round(height)));
   bottomDockUserSized.value = true;
 }
 
@@ -867,12 +861,12 @@ function handleBottomDockResizeKeydown(event: KeyboardEvent): void {
   }
   if (event.key === "Home") {
     event.preventDefault();
-    setBottomDockHeight(180);
+    setBottomDockHeight(BOTTOM_DOCK_MIN_HEIGHT);
     return;
   }
   if (event.key === "End") {
     event.preventDefault();
-    setBottomDockHeight(420);
+    setBottomDockHeight(BOTTOM_DOCK_MAX_HEIGHT);
   }
 }
 
@@ -899,14 +893,14 @@ function fitCanvasToView(): void {
 async function requestCanvasFullscreen(): Promise<void> {
   const stage = artboardRef.value?.closest(".canvas-stage") as (HTMLElement & { requestFullscreen?: () => Promise<void> }) | null;
   if (!stage?.requestFullscreen) {
-    appendLog(copy.value.runtime.canvasFullscreenUnavailable, "10:21:10");
+    appendLog(copy.value.runtime.canvasFullscreenUnavailable);
     return;
   }
   try {
     await stage.requestFullscreen();
-    appendLog(copy.value.runtime.canvasFullscreenOpened, "10:21:10");
+    appendLog(copy.value.runtime.canvasFullscreenOpened);
   } catch (error) {
-    appendLog(error instanceof Error ? copy.value.runtime.canvasFullscreenFailedWithMessage(error.message) : copy.value.runtime.canvasFullscreenFailed, "10:21:10");
+    appendLog(error instanceof Error ? copy.value.runtime.canvasFullscreenFailedWithMessage(error.message) : copy.value.runtime.canvasFullscreenFailed);
   }
 }
 
@@ -920,10 +914,10 @@ async function copyGeneratedCode(): Promise<void> {
   try {
     await writeClipboardText(code);
     codeCopyStatus.value = copy.value.runtime.codeCopied;
-    appendLog(copy.value.runtime.generatedCodeCopied, "10:21:10");
+    appendLog(copy.value.runtime.generatedCodeCopied);
   } catch (error) {
     codeCopyStatus.value = copy.value.runtime.codeCopyFailed;
-    appendLog(error instanceof Error ? copy.value.runtime.codeCopyFailedWithMessage(error.message) : copy.value.runtime.codeCopyFailed, "10:21:10");
+    appendLog(error instanceof Error ? copy.value.runtime.codeCopyFailedWithMessage(error.message) : copy.value.runtime.codeCopyFailed);
   }
 }
 
@@ -933,7 +927,7 @@ async function writeClipboardText(text: string): Promise<void> {
       await Promise.race([
         navigator.clipboard.writeText(text),
         new Promise((_, reject) => {
-          window.setTimeout(() => reject(new Error(copy.value.runtime.clipboardWriteTimedOut)), 1200);
+          window.setTimeout(() => reject(new Error(copy.value.runtime.clipboardWriteTimedOut)), CLIPBOARD_TIMEOUT);
         })
       ]);
       return;
@@ -983,10 +977,10 @@ async function loginDemo(): Promise<void> {
 
 function logLoginResult(): void {
   if (authStore.user) {
-    upsertLog("auth-login", "10:21:11", copy.value.runtime.loggedInAs(authStore.user.displayName));
+    upsertLog("auth-login", copy.value.runtime.loggedInAs(authStore.user.displayName));
     return;
   }
-  upsertLog("auth-login-failed", "10:21:11", copy.value.runtime.loginFailed(authStore.error ?? copy.value.runtime.unknownError));
+  upsertLog("auth-login-failed", copy.value.runtime.loginFailed(authStore.error ?? copy.value.runtime.unknownError));
 }
 
 function addWidgetFromPalette(type: Exclude<WidgetNode["type"], "screen">): void {
@@ -1044,21 +1038,9 @@ function scheduleAutosave(): void {
   }, 800);
 }
 
-function scheduleSimulatorRender(): void {
-  if (simulatorRenderTimer.value) {
-    clearTimeout(simulatorRenderTimer.value);
-  }
-  simulatorRenderTimer.value = setTimeout(() => {
-    if (activeEditorShellToken !== editorShellToken) {
-      return;
-    }
-    void renderSimulator();
-  }, 500);
-}
-
 function openNewProjectDialog(): void {
   if (!getAuthToken()) {
-    upsertLog("project-create-cloud-required", "10:21:11", copy.value.runtime.signInBeforeCloudProjects);
+    upsertLog("project-create-cloud-required", copy.value.runtime.signInBeforeCloudProjects);
     return;
   }
   newProjectReturnFocusElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1098,13 +1080,13 @@ async function createNewProject(): Promise<void> {
     closeNewProjectDialog();
     logEntries.value.push({
       id: `log-project-created-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: copy.value.runtime.projectCreated
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-create-error-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: localizedOperationError(error, "PROJECT_CREATE_FAILED", copy.value.runtime.projectCreateFailed)
     });
   }
@@ -1112,20 +1094,20 @@ async function createNewProject(): Promise<void> {
 
 async function loadProjectList(): Promise<void> {
   if (!getAuthToken()) {
-    upsertLog("project-list-cloud-required", "10:21:11", copy.value.runtime.signInBeforeLoadingProjects);
+    upsertLog("project-list-cloud-required", copy.value.runtime.signInBeforeLoadingProjects);
     return;
   }
   try {
     await projectStore.loadProjects();
     logEntries.value.push({
       id: `log-project-list-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: copy.value.runtime.projectListLoaded
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-list-error-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: localizedOperationError(error, "PROJECT_LIST_FAILED", copy.value.runtime.projectListFailed)
     });
   }
@@ -1144,13 +1126,13 @@ async function openProject(projectId: string): Promise<void> {
     void renderSimulator();
     logEntries.value.push({
       id: `log-project-opened-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: copy.value.runtime.projectOpened
     });
   } catch (error) {
     logEntries.value.push({
       id: `log-project-open-error-${logEntries.value.length}`,
-      time: "10:21:11",
+      time: new Date().toLocaleTimeString(),
       message: localizedOperationError(error, "PROJECT_LOOKUP_FAILED", copy.value.runtime.projectOpenFailed)
     });
   }
@@ -1211,32 +1193,32 @@ async function downloadExportZip(): Promise<void> {
       } catch {
         // Object URL cleanup is best-effort; the download has already completed.
       }
-    }, 1000);
-    upsertLog("export-downloaded", "10:21:12", copy.value.runtime.exportZipDownloaded);
+    }, OBJECT_URL_CLEANUP_DELAY);
+    upsertLog("export-downloaded", copy.value.runtime.exportZipDownloaded);
   } catch (error) {
-    upsertLog("export-download-failed", "10:21:12", localizedOperationError(error, "JOB_DOWNLOAD_FAILED", copy.value.runtime.exportDownloadFailed));
+    upsertLog("export-download-failed", localizedOperationError(error, "JOB_DOWNLOAD_FAILED", copy.value.runtime.exportDownloadFailed));
   }
 }
 
 async function saveProjectWithLog(): Promise<boolean> {
   const saved = await projectStore.saveProject();
   if (!saved) {
-    upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
+    upsertLog("project-save-failed", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
     return false;
   }
   const synced = await syncLocalAssetsToCloud();
   if (!synced.ok) {
-    upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(assetsStore.error ?? copy.value.runtime.unknownError));
+    upsertLog("project-save-failed", copy.value.runtime.projectSaveFailed(assetsStore.error ?? copy.value.runtime.unknownError));
     return false;
   }
   if (synced.changed) {
     const resaved = await projectStore.saveProject();
     if (!resaved) {
-      upsertLog("project-save-failed", "10:21:11", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
+      upsertLog("project-save-failed", copy.value.runtime.projectSaveFailed(projectStore.saveError ?? copy.value.runtime.unknownError));
       return false;
     }
   }
-  upsertLog("project-saved", "10:21:11", copy.value.runtime.projectSaved);
+  upsertLog("project-saved", copy.value.runtime.projectSaved);
   return true;
 }
 
@@ -1254,7 +1236,7 @@ async function syncLocalAssetsToCloud(): Promise<{ ok: boolean; changed: boolean
       return { ok: false, changed: false };
     }
     projectStore.replaceAssetReference(uploaded.oldAssetId, uploaded.asset);
-    appendLog(copy.value.runtime.assetUploaded(uploaded.asset.name), "10:21:11");
+    appendLog(copy.value.runtime.assetUploaded(uploaded.asset.name));
   }
   return { ok: true, changed: true };
 }
@@ -1262,7 +1244,7 @@ async function syncLocalAssetsToCloud(): Promise<{ ok: boolean; changed: boolean
 function logoutUser(): void {
   authStore.logout();
   assetsStore.clearError();
-  upsertLog("auth-signed-out", "10:21:12", copy.value.status.signedOutLocalEditing);
+  upsertLog("auth-signed-out", copy.value.status.signedOutLocalEditing);
 }
 
 function lastEntryIndex(entries: Array<{ id: string }>, id: string): number {
@@ -2068,14 +2050,14 @@ async function importReferenceAsset(file: File): Promise<void> {
   if (asset?.kind === "image" && selectedWidget.value?.type === "image" && !selectedWidget.value.locked) {
     projectStore.bindSelectedImageAsset(asset.id);
     activeInspectorTab.value = "style";
-    appendLog(copy.value.runtime.assetBoundFromPanel, "10:21:11");
+    appendLog(copy.value.runtime.assetBoundFromPanel);
   }
 }
 
 async function uploadAssetAndRegister(file: File, options: { allowLocalFallback?: boolean } = {}): Promise<AssetRef | null> {
   const saved = await saveProjectWithLog();
   if (!saved) {
-    upsertLog("asset-upload-blocked", "10:21:11", copy.value.runtime.assetUploadSaveFailed);
+    upsertLog("asset-upload-blocked", copy.value.runtime.assetUploadSaveFailed);
     if (options.allowLocalFallback) {
       return importLocalAssetAndRegister(file);
     }
@@ -2086,13 +2068,13 @@ async function uploadAssetAndRegister(file: File, options: { allowLocalFallback?
       return importLocalAssetAndRegister(file);
     }
     assetsStore.error = copy.value.runtime.signInBeforeAssetsError;
-    upsertLog("asset-upload-cloud-required", "10:21:11", copy.value.runtime.signInBeforeAssets);
+    upsertLog("asset-upload-cloud-required", copy.value.runtime.signInBeforeAssets);
     return null;
   }
   const asset = await assetsStore.uploadAsset(project.value.id, file);
   if (asset) {
     projectStore.registerAsset(asset);
-    appendLog(copy.value.runtime.assetUploaded(asset.name), "10:21:11");
+    appendLog(copy.value.runtime.assetUploaded(asset.name));
     return asset;
   }
   if (options.allowLocalFallback) {
@@ -2107,19 +2089,19 @@ function importLocalAssetAndRegister(file: File): AssetRef | null {
     return null;
   }
   projectStore.registerAsset(asset);
-  appendLog(copy.value.runtime.assetImportedLocally(asset.name), "10:21:11");
+  appendLog(copy.value.runtime.assetImportedLocally(asset.name));
   return asset;
 }
 
 function bindAssetFromPanel(assetId: string): void {
   const widget = selectedWidget.value;
   if (!widget || widget.type !== "image" || widget.locked) {
-    appendLog(copy.value.runtime.selectImageWidgetBeforeBinding, "10:21:11");
+    appendLog(copy.value.runtime.selectImageWidgetBeforeBinding);
     return;
   }
   projectStore.bindSelectedImageAsset(assetId);
   activeInspectorTab.value = "style";
-  appendLog(copy.value.runtime.assetBoundFromPanel, "10:21:11");
+  appendLog(copy.value.runtime.assetBoundFromPanel);
 }
 
 function isLocalOnlyProject(): boolean {
@@ -2177,7 +2159,7 @@ async function deleteAssetNow(assetId: string): Promise<void> {
     await saveProjectWithLog();
     return;
   }
-  appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
+  appendLog(copy.value.runtime.assetDeleted(assetName));
   focusAssetToolbarAfterDelete();
 }
 
@@ -2198,7 +2180,7 @@ async function deleteReferencedAssetNow(assetId: string): Promise<void> {
     await saveProjectWithLog();
     return;
   }
-  appendLog(copy.value.runtime.assetDeleted(assetName), "10:21:11");
+  appendLog(copy.value.runtime.assetDeleted(assetName));
   focusAssetToolbarAfterDelete();
 }
 
@@ -2405,96 +2387,8 @@ function commitKeyboardNudge(): void {
   keyboardNudge.value = null;
 }
 
-async function mountSimulator(): Promise<void> {
-  if (simulatorRuntime.value) {
-    return;
-  }
-  const canvas = simulatorCanvas.value;
-  const mountGeneration = simulatorMountGeneration;
-  if (!canvas || !simulatorVisible.value) {
-    return;
-  }
-  if (simulatorMountInFlightGeneration === mountGeneration) {
-    return;
-  }
-  simulatorMountInFlightGeneration = mountGeneration;
-  try {
-    simulatorStore.markLoading(copy.value.runtime.loadingRuntime);
-    const runtime = await loadRuntime({
-      wasmModuleUrl: simulatorWasmModuleUrl,
-      assetResolver: (asset) => assetsStore.previewUrls[asset.id] ?? null
-    });
-    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
-      runtime.destroy();
-      return;
-    }
-    simulatorRuntime.value = runtime;
-    simulatorStore.setRuntimeKind(simulatorRuntime.value.getRuntimeKind?.() ?? "unknown");
-    await simulatorRuntime.value.mount(canvas);
-    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
-      simulatorRuntime.value?.destroy();
-      simulatorRuntime.value = null;
-      return;
-    }
-    simulatorStore.markReady(copy.value.runtime.simulatorLoaded);
-    upsertLog("simulator-loaded", "10:21:13", copy.value.runtime.simulatorLoaded);
-    await renderSimulator();
-  } catch (error) {
-    if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
-      return;
-    }
-    const message = simulatorErrorMessage(error, copy.value.runtime.runtimeLoadFailed);
-    simulatorStore.markFailed(message);
-    upsertLog("simulator-load-failed", "10:21:13", message);
-  } finally {
-    if (simulatorMountInFlightGeneration === mountGeneration) {
-      simulatorMountInFlightGeneration = null;
-    }
-  }
-}
-
-async function renderSimulator(): Promise<boolean> {
-  const runtime = simulatorRuntime.value;
-  const canvas = simulatorCanvas.value;
-  const renderGeneration = simulatorMountGeneration;
-  if (!runtime || !canvas || !simulatorVisible.value) {
-    return false;
-  }
-  try {
-    const screenName = activeScreen.value?.name ?? "Screen_1";
-    simulatorStore.markRendering(screenName, copy.value.runtime.renderScreen(screenName));
-    await runtime.renderProject(projectDocForRuntime(project.value, activeScreen.value?.id ?? null));
-    if (renderGeneration !== simulatorMountGeneration || simulatorRuntime.value !== runtime || simulatorCanvas.value !== canvas || !simulatorVisible.value) {
-      return false;
-    }
-    simulatorStore.markReady(copy.value.runtime.previewUpdated);
-    appendSimulatorRenderLog(screenName);
-    upsertLog("preview-updated", "10:21:13", copy.value.runtime.previewUpdated);
-    return true;
-  } catch (error) {
-    if (renderGeneration !== simulatorMountGeneration || simulatorRuntime.value !== runtime || simulatorCanvas.value !== canvas || !simulatorVisible.value) {
-      return false;
-    }
-    const message = simulatorErrorMessage(error, copy.value.runtime.previewFailed);
-    simulatorStore.markFailed(message);
-    appendLog(message, "10:21:13");
-    return false;
-  }
-}
-
-function simulatorErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof SimulatorRuntimeError) {
-    const summary = localizedErrorForCode(error.code, localeStore.locale, "RUNTIME_LOAD_FAILED");
-    if (localeStore.locale === "en-US" && error.message) {
-      return error.message.startsWith(summary) ? error.message : `${summary}: ${error.message}`;
-    }
-    return summary;
-  }
-  return error instanceof Error && localeStore.locale === "en-US" ? error.message : fallback;
-}
-
 function appendSimulatorRenderLog(screenName: string): void {
-  upsertLog("simulator-render", "10:21:13", copy.value.runtime.renderScreen(screenName));
+  upsertLog("simulator-render", copy.value.runtime.renderScreen(screenName));
 }
 
 function localizedOperationError(error: unknown, fallbackCode: string, fallbackMessage: string): string {
@@ -2504,22 +2398,23 @@ function localizedOperationError(error: unknown, fallbackCode: string, fallbackM
   return localizedErrorForCode(fallbackCode, localeStore.locale) || fallbackMessage;
 }
 
-function appendLog(message: string, time: string, stableKey?: string): void {
+function appendLog(message: string, time?: string, stableKey?: string): void {
   logEntries.value.push({
     id: stableKey ? `log-${stableKey}` : `log-${logEntries.value.length}`,
-    time,
+    time: time ?? new Date().toLocaleTimeString(),
     message
   });
 }
 
-function upsertLog(stableKey: string, time: string, message: string): void {
+function upsertLog(stableKey: string, message: string, time?: string): void {
   const id = `log-${stableKey}`;
+  const timestamp = time ?? new Date().toLocaleTimeString();
   const index = logEntries.value.findIndex((entry) => entry.id === id);
   if (index >= 0) {
-    logEntries.value[index] = { id, time, message };
+    logEntries.value[index] = { id, time: timestamp, message };
     return;
   }
-  appendLog(message, time, stableKey);
+  appendLog(message, timestamp, stableKey);
 }
 
 function projectDocForRuntime(doc: ProjectDoc, activeScreenId: string | null): ProjectDoc {

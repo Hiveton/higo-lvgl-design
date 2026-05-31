@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { WidgetNode } from "@hiveton-lvgl/schema";
 import { getActiveScreen, type ProjectDoc } from "@hiveton-lvgl/schema";
 import { replaceProjectDocCommand } from "../commands/editorCommands";
+import { createEditorUUID, collectWidgetIds, collectExistingWidgetNames } from "../utils";
 import { useProjectStore } from "./project";
 import { useSelectionStore } from "./selection";
 
@@ -117,7 +118,7 @@ export const useScreenStore = defineStore("screen", () => {
     }
     const nextIndex = doc.screens.length + 1;
     const nextScreenId = createEditorUUID();
-    const names = collectExistingWidgetNames(doc);
+    const names = collectExistingWidgetNames(doc.screens.map(s => s.root));
     const sequence = { count: 1 };
     const root = cloneWidgetForPaste(source.root, null, names, sequence);
     const nextName = nextCopyName(new Set(doc.screens.map((screen) => screen.name)), source.name);
@@ -206,18 +207,6 @@ export const useScreenStore = defineStore("screen", () => {
   };
 });
 
-function createEditorUUID(): string {
-  const randomUUID = globalThis.crypto?.randomUUID;
-  if (typeof randomUUID === "function") {
-    return randomUUID.call(globalThis.crypto);
-  }
-  return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (character) => {
-    const random = Math.trunc(Math.random() * 16);
-    const value = Number(character) ^ (random & (15 >> (Number(character) / 4)));
-    return value.toString(16);
-  });
-}
-
 function cloneWidgetForPaste(
   widget: WidgetNode,
   parentId: string | null,
@@ -283,31 +272,6 @@ function uniqueScreenName(name: string, existingNames: string[]): string {
     return name;
   }
   return nextCopyName(names, name);
-}
-
-function collectExistingWidgetNames(doc: ProjectDoc): Set<string> {
-  const names = new Set<string>();
-  for (const screen of doc.screens) {
-    collectNames(screen.root, names);
-  }
-  return names;
-}
-
-function collectNames(widget: WidgetNode, names: Set<string>): void {
-  names.add(widget.name);
-  for (const child of widget.children) {
-    collectNames(child, names);
-  }
-}
-
-function collectWidgetIds(widget: WidgetNode): Set<string> {
-  const ids = new Set<string>([widget.id]);
-  for (const child of widget.children) {
-    for (const childId of collectWidgetIds(child)) {
-      ids.add(childId);
-    }
-  }
-  return ids;
 }
 
 function nextScreenIndex(doc: ProjectDoc): number {
