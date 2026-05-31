@@ -1,11 +1,12 @@
 import { ref, computed, type Ref } from "vue";
-import type { ProjectDoc, AssetRef, WidgetNode } from "@hiveton-lvgl/schema";
+import type { ProjectDoc, WidgetNode } from "@hiveton-lvgl/schema";
+import { useAssetsStore } from "../stores/assets";
 
 export function useAssetManagement(
   project: Ref<ProjectDoc>,
-  assetsStore: any,
   selectedWidget: Ref<WidgetNode | undefined>
 ) {
+  const assetsStore = useAssetsStore();
   const imagePreviewUrl = ref<string | null>(null);
   const pendingAssetDelete = ref<null | { assetId: string; name: string; usageCount: number }>(null);
 
@@ -83,7 +84,7 @@ export function useAssetManagement(
   }
 
   function isLocalAsset(assetId: string): boolean {
-    const asset = project.value.assets.find((item) => item.id === assetId) ?? assetsStore.assets.find((item: any) => item.id === assetId);
+    const asset = project.value.assets.find((item) => item.id === assetId) ?? assetsStore.assets.find((item) => item.id === assetId);
     return asset?.objectKey.startsWith("local://") === true;
   }
 

@@ -58,10 +58,10 @@ describe("useProjectStore", () => {
     expect(store.selectedWidget?.props.text).toBe("10:09");
   });
 
-  it("adds a widget from the catalog to the active screen and selects it", () => {
+  it("adds a widget from the catalog to the active screen and selects it", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("label", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("label", { x: 24, y: 32 });
 
     expect(store.selectedWidget?.type).toBe("label");
     expect(store.selectedWidget?.name).toBe("Label_1");
@@ -69,14 +69,14 @@ describe("useProjectStore", () => {
     expect(store.activeScreen?.root.children.some((widget) => widget.name === "Label_1")).toBe(true);
   });
 
-  it("uses UUID ids for newly created widgets, screens and pasted widget trees", () => {
+  it("uses UUID ids for newly created widgets, screens and pasted widget trees", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("label", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("label", { x: 24, y: 32 });
     const createdWidgetId = store.selectedWidget?.id;
     expect(createdWidgetId).toMatch(uuidPattern);
 
-    store.addScreen();
+    await store.addScreen();
     expect(store.activeScreen?.id).toMatch(uuidPattern);
     expect(store.activeScreen?.root.id).toMatch(uuidPattern);
 
@@ -86,10 +86,10 @@ describe("useProjectStore", () => {
     expect(store.selectedWidget?.id).toMatch(uuidPattern);
   });
 
-  it("exposes command history entries for the timeline", () => {
+  it("exposes command history entries for the timeline", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("label", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("label", { x: 24, y: 32 });
     expect(store.historyEntries).toContainEqual(
       expect.objectContaining({ label: "Add Label_1", status: "done" })
     );
@@ -105,14 +105,14 @@ describe("useProjectStore", () => {
     );
   });
 
-  it("adds new widgets inside the selected container", () => {
+  it("adds new widgets inside the selected container", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("container", { x: 16, y: 24 });
+    await store.addWidgetFromCatalog("container", { x: 16, y: 24 });
     const container = store.selectedWidget;
     expect(container?.type).toBe("container");
 
-    store.addWidgetFromCatalog("label", { x: 8, y: 12 });
+    await store.addWidgetFromCatalog("label", { x: 8, y: 12 });
 
     const updatedContainer = store.activeScreen?.root.children.find((widget) => widget.id === container?.id);
     expect(updatedContainer?.children).toHaveLength(1);
@@ -123,13 +123,13 @@ describe("useProjectStore", () => {
     });
   });
 
-  it("adds new widgets inside an explicit drop target container", () => {
+  it("adds new widgets inside an explicit drop target container", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("container", { x: 16, y: 24 });
+    await store.addWidgetFromCatalog("container", { x: 16, y: 24 });
     const containerId = store.selectedWidget!.id;
     store.selectWidget("time-label");
-    store.addWidgetFromCatalog("label", { x: 18, y: 20 }, { parentId: containerId });
+    await store.addWidgetFromCatalog("label", { x: 18, y: 20 }, { parentId: containerId });
 
     const container = store.activeScreen?.root.children.find((widget) => widget.id === containerId);
     expect(container?.children[0]).toMatchObject({
@@ -201,12 +201,12 @@ describe("useProjectStore", () => {
     });
   });
 
-  it("copies and pastes nested widgets with corrected child parent ids", () => {
+  it("copies and pastes nested widgets with corrected child parent ids", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("container", { x: 16, y: 24 });
+    await store.addWidgetFromCatalog("container", { x: 16, y: 24 });
     const containerId = store.selectedWidget!.id;
-    store.addWidgetFromCatalog("label", { x: 8, y: 12 });
+    await store.addWidgetFromCatalog("label", { x: 8, y: 12 });
     store.selectWidget(containerId);
     store.copySelectedWidget();
     store.pasteCopiedWidget();
@@ -236,10 +236,10 @@ describe("useProjectStore", () => {
     });
   });
 
-  it("moves widgets from layers into containers", () => {
+  it("moves widgets from layers into containers", async () => {
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("container", { x: 16, y: 24 });
+    await store.addWidgetFromCatalog("container", { x: 16, y: 24 });
     const containerId = store.selectedWidget!.id;
     store.selectWidget("date-label");
     store.moveWidgetLayerDrop("date-label", containerId);
@@ -289,7 +289,7 @@ describe("useProjectStore", () => {
     expect(store.selectedWidget?.style.bgColor).toBeUndefined();
   });
 
-  it("registers assets in ProjectDoc and binds an image asset to the selected widget", () => {
+  it("registers assets in ProjectDoc and binds an image asset to the selected widget", async () => {
     const store = useProjectStore();
     const asset = {
       id: "asset-1",
@@ -309,7 +309,7 @@ describe("useProjectStore", () => {
     expect(store.project.assets).toEqual([]);
 
     store.registerAsset(asset);
-    store.addWidgetFromCatalog("image", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("image", { x: 24, y: 32 });
     store.bindSelectedImageAsset("asset-1");
 
     expect(store.project.assets).toContainEqual(asset);
@@ -328,7 +328,7 @@ describe("useProjectStore", () => {
     expect(store.selectedWidget?.props.assetId).toBeUndefined();
   });
 
-  it("replaces migrated asset ids across ProjectDoc assets and references", () => {
+  it("replaces migrated asset ids across ProjectDoc assets and references", async () => {
     const store = useProjectStore();
     const localImage = {
       id: "local-heart",
@@ -364,7 +364,7 @@ describe("useProjectStore", () => {
     };
 
     store.registerAsset(localImage);
-    store.addWidgetFromCatalog("image", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("image", { x: 24, y: 32 });
     store.bindSelectedImageAsset("local-heart");
     store.registerAsset(localFont);
     store.updateSelectedStyle({ font: "local-font" });
@@ -383,7 +383,7 @@ describe("useProjectStore", () => {
     expect(store.project.styles[0]?.style.font).toBe("asset-font-cloud");
   });
 
-  it("does not bind non-image assets to image widgets", () => {
+  it("does not bind non-image assets to image widgets", async () => {
     const store = useProjectStore();
     const fontAsset = {
       id: "font-1",
@@ -397,7 +397,7 @@ describe("useProjectStore", () => {
     };
 
     store.registerAsset(fontAsset);
-    store.addWidgetFromCatalog("image", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("image", { x: 24, y: 32 });
     store.bindSelectedImageAsset("font-1");
 
     expect(store.selectedWidget?.type).toBe("image");
@@ -554,11 +554,11 @@ describe("useProjectStore", () => {
     expect(validateProjectDoc(store.project).valid).toBe(true);
   });
 
-  it("renames project, active screen and selected widget", () => {
+  it("renames project, active screen and selected widget", async () => {
     const store = useProjectStore();
 
     store.renameProject("Demo Panel");
-    store.renameScreen("screen-1", "Main_Screen");
+    await store.renameScreen("screen-1", "Main_Screen");
     store.renameWidget("time-label", "Clock_Label");
 
     expect(store.project.name).toBe("Demo Panel");
@@ -679,11 +679,11 @@ describe("useProjectStore", () => {
     expect(validateProjectDoc(store.project).valid).toBe(true);
   });
 
-  it("adds, switches and deletes screens while keeping one screen", () => {
+  it("adds, switches and deletes screens while keeping one screen", async () => {
     const store = useProjectStore();
 
-    store.addScreen();
-    store.addWidgetFromCatalog("label", { x: 24, y: 32 });
+    await store.addScreen();
+    await store.addWidgetFromCatalog("label", { x: 24, y: 32 });
     store.addEventBinding("LV_EVENT_CLICKED", "on_screen_2_label_clicked");
     expect(store.project.events).toHaveLength(1);
 
@@ -691,31 +691,31 @@ describe("useProjectStore", () => {
     expect(store.activeScreen?.name).toBe("Screen_2");
     const secondScreenId = store.activeScreen!.id;
 
-    store.switchScreen("screen-1");
+    await store.switchScreen("screen-1");
     expect(store.activeScreen?.name).toBe("Screen_1");
 
-    store.deleteScreen(secondScreenId);
+    await store.deleteScreen(secondScreenId);
     expect(store.project.screens.map((screen) => screen.name)).toEqual(["Screen_1"]);
     expect(store.activeScreen?.name).toBe("Screen_1");
     expect(store.project.events).toEqual([]);
 
-    store.deleteScreen(store.activeScreen!.id);
+    await store.deleteScreen(store.activeScreen!.id);
     expect(store.project.screens).toHaveLength(1);
   });
 
-  it("adds screens with unique ids after deleting a middle screen", () => {
+  it("adds screens with unique ids after deleting a middle screen", async () => {
     const store = useProjectStore();
 
-    store.addScreen();
-    store.addScreen();
+    await store.addScreen();
+    await store.addScreen();
     const secondScreenId = store.project.screens[1].id;
     const thirdScreenId = store.project.screens[2].id;
     expect(store.project.screens.map((screen) => screen.id)).toEqual(["screen-1", secondScreenId, thirdScreenId]);
     expect(secondScreenId).toMatch(uuidPattern);
     expect(thirdScreenId).toMatch(uuidPattern);
 
-    store.deleteScreen(secondScreenId);
-    store.addScreen();
+    await store.deleteScreen(secondScreenId);
+    await store.addScreen();
     const fourthScreenId = store.project.screens[2].id;
 
     expect(store.project.screens.map((screen) => screen.id)).toEqual(["screen-1", thirdScreenId, fourthScreenId]);
@@ -729,27 +729,27 @@ describe("useProjectStore", () => {
     expect(store.project.screens.map((screen) => screen.name)).toEqual(["Screen_1", "Screen_3", "Screen_4"]);
   });
 
-  it("switches to the adjacent screen after deleting the active screen", () => {
+  it("switches to the adjacent screen after deleting the active screen", async () => {
     const store = useProjectStore();
 
-    store.addScreen();
-    store.addScreen();
+    await store.addScreen();
+    await store.addScreen();
     expect(store.project.screens.map((screen) => screen.name)).toEqual(["Screen_1", "Screen_2", "Screen_3"]);
     const secondScreenId = store.project.screens[1].id;
     const thirdScreenId = store.project.screens[2].id;
 
-    store.switchScreen(secondScreenId);
-    store.deleteScreen(secondScreenId);
+    await store.switchScreen(secondScreenId);
+    await store.deleteScreen(secondScreenId);
     expect(store.activeScreen?.id).toBe(thirdScreenId);
 
-    store.deleteScreen(thirdScreenId);
+    await store.deleteScreen(thirdScreenId);
     expect(store.activeScreen?.id).toBe("screen-1");
   });
 
-  it("duplicates the active screen with unique screen and widget ids", () => {
+  it("duplicates the active screen with unique screen and widget ids", async () => {
     const store = useProjectStore();
 
-    store.duplicateScreen("screen-1");
+    await store.duplicateScreen("screen-1");
 
     expect(store.project.screens).toHaveLength(2);
     expect(store.activeScreen?.name).toBe("Screen_1_1");
@@ -759,11 +759,11 @@ describe("useProjectStore", () => {
     expect(store.activeScreen?.root.children[0].parentId).toBe(store.activeScreen?.root.id);
   });
 
-  it("duplicates screen event bindings onto the cloned widget ids", () => {
+  it("duplicates screen event bindings onto the cloned widget ids", async () => {
     const store = useProjectStore();
 
     store.addEventBinding("LV_EVENT_CLICKED", "on_time_clicked", "time-label");
-    store.duplicateScreen("screen-1");
+    await store.duplicateScreen("screen-1");
 
     const clonedTimeLabelId = store.activeScreen?.root.children.find((widget) => widget.name === "Time_Label_1")?.id;
     expect(clonedTimeLabelId).toBeTruthy();
@@ -775,13 +775,13 @@ describe("useProjectStore", () => {
     });
   });
 
-  it("keeps document-level edits in undo and redo history", () => {
+  it("keeps document-level edits in undo and redo history", async () => {
     const store = useProjectStore();
 
     store.renameProject("Renamed UI");
     store.updateTarget({ width: 320, height: 240 });
-    store.addScreen();
-    store.renameScreen(store.activeScreen!.id, "Settings");
+    await store.addScreen();
+    await store.renameScreen(store.activeScreen!.id, "Settings");
 
     expect(store.project.name).toBe("Renamed UI");
     expect(store.project.target).toMatchObject({ width: 320, height: 240 });
@@ -885,9 +885,9 @@ describe("useProjectStore", () => {
     expect(validateProjectDoc(store.project).valid).toBe(true);
   });
 
-  it("keeps event handlers from colliding with generated widget helper symbols", () => {
+  it("keeps event handlers from colliding with generated widget helper symbols", async () => {
     const store = useProjectStore();
-    store.addWidgetFromCatalog("chart", { x: 24, y: 32 });
+    await store.addWidgetFromCatalog("chart", { x: 24, y: 32 });
     const chartId = store.selectedWidget?.id;
 
     store.addEventBinding("LV_EVENT_READY", "ui_Chart_1_series", chartId);
@@ -1205,7 +1205,7 @@ describe("useProjectStore", () => {
     vi.stubGlobal("fetch", fetchMock);
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("image", { x: 32, y: 32 });
+    await store.addWidgetFromCatalog("image", { x: 32, y: 32 });
     const selectedBeforeSave = store.selectedWidget?.id;
     const saved = await store.saveProject();
 
@@ -1220,7 +1220,7 @@ describe("useProjectStore", () => {
     vi.stubGlobal("fetch", fetchMock);
     const store = useProjectStore();
 
-    store.addWidgetFromCatalog("image", { x: 0, y: 0 });
+    await store.addWidgetFromCatalog("image", { x: 0, y: 0 });
     store.updateSelectedProps({ assetId: "missing-asset" });
     const saved = await store.saveProject();
 

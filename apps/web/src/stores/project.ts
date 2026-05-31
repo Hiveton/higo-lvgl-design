@@ -42,6 +42,7 @@ import {
 } from "../api/projects";
 import { getAuthToken, getBrowserStorage } from "../api/auth";
 import { localizedErrorForCode, localizeError } from "../i18n/errors";
+import { useClipboardStore } from "./clipboard";
 import { useHistoryStore } from "./history";
 import { useLocaleStore } from "./locale";
 import { useSelectionStore } from "./selection";
@@ -138,14 +139,11 @@ export const useProjectStore = defineStore("project", () => {
         .filter((event) => copiedWidgetIds.has(event.widgetId))
         .map((event) => ({ ...event }))
     };
-    // Store in clipboard store
-    const { useClipboardStore } = require("./clipboard");
     const clipboardStore = useClipboardStore();
     clipboardStore.copy(copiedData.widget, copiedData.events);
   }
 
   function pasteCopiedWidget(): void {
-    const { useClipboardStore } = require("./clipboard");
     const clipboardStore = useClipboardStore();
     const clipboard = clipboardStore.paste();
     const screen = activeScreen.value;
@@ -182,7 +180,6 @@ export const useProjectStore = defineStore("project", () => {
   }
 
   function canPasteWidget(): boolean {
-    const { useClipboardStore } = require("./clipboard");
     const clipboardStore = useClipboardStore();
     const clipboard = clipboardStore.paste();
     const screen = activeScreen.value;
@@ -245,8 +242,8 @@ export const useProjectStore = defineStore("project", () => {
     });
   }
 
-  function addWidgetFromCatalog(type: Exclude<WidgetType, "screen">, point: { x: number; y: number }, options: { parentId?: string } = {}): void {
-    const { useWidgetStore } = require("./widget");
+  async function addWidgetFromCatalog(type: Exclude<WidgetType, "screen">, point: { x: number; y: number }, options: { parentId?: string } = {}): Promise<void> {
+    const { useWidgetStore } = await import("./widget");
     const widgetStore = useWidgetStore();
     widgetStore.addWidgetFromCatalog(type, point, options);
   }
@@ -279,32 +276,32 @@ export const useProjectStore = defineStore("project", () => {
     execute(resizeWidget({ widgetId: widget.id, width: size.width, height: size.height }));
   }
 
-  function addScreen(name?: string): void {
-    const { useScreenStore } = require("./screen");
+  async function addScreen(name?: string): Promise<void> {
+    const { useScreenStore } = await import("./screen");
     const screenStore = useScreenStore();
     screenStore.addScreen(name);
   }
 
-  function deleteScreen(screenId: string): void {
-    const { useScreenStore } = require("./screen");
+  async function deleteScreen(screenId: string): Promise<void> {
+    const { useScreenStore } = await import("./screen");
     const screenStore = useScreenStore();
     screenStore.deleteScreen(screenId);
   }
 
-  function switchScreen(screenId: string): void {
-    const { useScreenStore } = require("./screen");
+  async function switchScreen(screenId: string): Promise<void> {
+    const { useScreenStore } = await import("./screen");
     const screenStore = useScreenStore();
     screenStore.switchScreen(screenId);
   }
 
-  function duplicateScreen(screenId: string): void {
-    const { useScreenStore } = require("./screen");
+  async function duplicateScreen(screenId: string): Promise<void> {
+    const { useScreenStore } = await import("./screen");
     const screenStore = useScreenStore();
     screenStore.duplicateScreen(screenId);
   }
 
-  function renameScreen(screenId: string, name: string): void {
-    const { useScreenStore } = require("./screen");
+  async function renameScreen(screenId: string, name: string): Promise<void> {
+    const { useScreenStore } = await import("./screen");
     const screenStore = useScreenStore();
     screenStore.renameScreen(screenId, name);
   }

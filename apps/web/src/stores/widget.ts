@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
-import type { WidgetNode, WidgetType, WidgetPropValue, WidgetStyle } from "@hiveton-lvgl/schema";
+import type { WidgetNode, WidgetType, WidgetPropValue } from "@hiveton-lvgl/schema";
 import { widgetCatalog } from "@hiveton-lvgl/schema";
 import {
   addWidget,
@@ -8,11 +8,11 @@ import {
   findWidgetById,
   moveWidget,
   resizeWidget,
+  updateWidgetLayout,
   updateWidgetProps,
   updateWidgetStyle
 } from "../commands/editorCommands";
 import { useProjectStore } from "./project";
-import { useHistoryStore } from "./history";
 import { useSelectionStore } from "./selection";
 
 type DropPoint = {
@@ -31,7 +31,6 @@ type AddWidgetOptions = {
 
 export const useWidgetStore = defineStore("widget", () => {
   const projectStore = useProjectStore();
-  const historyStore = useHistoryStore();
   const selectionStore = useSelectionStore();
 
   function addWidgetFromCatalog(type: Exclude<WidgetType, "screen">, point: DropPoint, options: AddWidgetOptions = {}): void {
@@ -114,13 +113,18 @@ export const useWidgetStore = defineStore("widget", () => {
     projectStore.executeCommand(resizeWidget({ widgetId: widget.id, width: size.width, height: size.height }));
   }
 
+  function updateWidgetLayoutById(widgetId: string, layout: Partial<{ x: number; y: number; width: number; height: number }>): void {
+    projectStore.executeCommand(updateWidgetLayout({ widgetId, layout }));
+  }
+
   return {
     addWidgetFromCatalog,
     deleteSelectedWidget,
     updateSelectedProps,
     updateSelectedStyle,
     moveSelectedWidget,
-    resizeSelectedWidget
+    resizeSelectedWidget,
+    updateWidgetLayoutById
   };
 });
 

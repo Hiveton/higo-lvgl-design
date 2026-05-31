@@ -1,11 +1,13 @@
 import { ref, computed, type Ref } from "vue";
 import type { LayoutBox, WidgetNode } from "@hiveton-lvgl/schema";
+import { useWidgetStore } from "../stores/widget";
 
 export function useCanvasInteraction(
   projectTarget: Ref<{ width: number; height: number }>,
   renderedWidgets: Ref<Array<{ widget: WidgetNode; x: number; y: number }>>,
   selectedWidget: Ref<WidgetNode | undefined>
 ) {
+  const widgetStore = useWidgetStore();
   const zoomPercent = ref(100);
   const gridEnabled = ref(true);
   const snapEnabled = ref(true);
@@ -113,7 +115,10 @@ export function useCanvasInteraction(
         width: session.startWidth,
         height: session.startHeight
       }, "move");
-      // TODO: 应用布局更新
+      widgetStore.updateWidgetLayoutById(session.widgetId, {
+        x: nextLayout.x,
+        y: nextLayout.y
+      });
       return;
     }
     const nextLayout = alignmentAdjustedLayout(session.widgetId, {
@@ -122,7 +127,10 @@ export function useCanvasInteraction(
       width: Math.max(1, snapCanvasValue(session.startWidth + deltaX)),
       height: Math.max(1, snapCanvasValue(session.startHeight + deltaY))
     }, "resize");
-    // TODO: 应用布局更新
+    widgetStore.updateWidgetLayoutById(session.widgetId, {
+      width: nextLayout.width,
+      height: nextLayout.height
+    });
     return;
   }
 

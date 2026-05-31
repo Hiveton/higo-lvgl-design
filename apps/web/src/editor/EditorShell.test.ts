@@ -3624,7 +3624,7 @@ describe("EditorShell", () => {
     });
     const projectStore = useProjectStore(pinia);
     const assetsStore = useAssetsStore(pinia);
-    projectStore.addWidgetFromCatalog("image", { x: 12, y: 16 });
+    await projectStore.addWidgetFromCatalog("image", { x: 12, y: 16 });
     const localAsset = assetsStore.importLocalAsset(projectStore.project.id, new File(["png"], "heart.png", { type: "image/png" }));
     expect(localAsset).not.toBeNull();
     projectStore.registerAsset(localAsset!);
@@ -3727,7 +3727,7 @@ describe("EditorShell", () => {
     expect(wrapper.get('[data-testid="asset-bind-hint"]').attributes("aria-live")).toBe("polite");
     expect(wrapper.get('[data-testid="asset-bind-hint"]').attributes("aria-atomic")).toBe("true");
 
-    projectStore.addWidgetFromCatalog("image", { x: 20, y: 20 });
+    await projectStore.addWidgetFromCatalog("image", { x: 20, y: 20 });
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('[data-testid="asset-bind-hint"]').exists()).toBe(false);

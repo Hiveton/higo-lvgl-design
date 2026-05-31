@@ -1,15 +1,13 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
-import type { ScreenNode, WidgetNode } from "@hiveton-lvgl/schema";
+import type { WidgetNode } from "@hiveton-lvgl/schema";
 import { getActiveScreen, type ProjectDoc } from "@hiveton-lvgl/schema";
-import { findWidgetById, replaceProjectDocCommand } from "../commands/editorCommands";
+import { replaceProjectDocCommand } from "../commands/editorCommands";
 import { useProjectStore } from "./project";
-import { useHistoryStore } from "./history";
 import { useSelectionStore } from "./selection";
 
 export const useScreenStore = defineStore("screen", () => {
   const projectStore = useProjectStore();
-  const historyStore = useHistoryStore();
   const selectionStore = useSelectionStore();
 
   const activeScreenId = computed({

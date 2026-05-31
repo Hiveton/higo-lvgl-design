@@ -1,15 +1,20 @@
 import { ref, onBeforeUnmount, type Ref } from "vue";
 import type { ProjectDoc } from "@hiveton-lvgl/schema";
 import { loadRuntime, SimulatorRuntimeError, type LvglRuntime } from "@hiveton-lvgl/lvgl-wasm-runtime";
+import type { EditorCopy } from "../i18n/copy";
+import { localizedErrorForCode } from "../i18n/errors";
+import { useSimulatorStore } from "../stores/simulator";
+import { useAssetsStore } from "../stores/assets";
+import { useLocaleStore } from "../stores/locale";
 
 export function useSimulator(
   project: Ref<ProjectDoc>,
   activeScreen: Ref<{ id: string; name: string } | undefined>,
-  simulatorStore: any,
-  assetsStore: any,
-  localeStore: any,
-  copy: Ref<any>
+  copy: Ref<EditorCopy>
 ) {
+  const simulatorStore = useSimulatorStore();
+  const assetsStore = useAssetsStore();
+  const localeStore = useLocaleStore();
   const simulatorVisible = ref(true);
   const simulatorCanvas = ref<HTMLCanvasElement | null>(null);
   const simulatorRuntime = ref<LvglRuntime | null>(null);
@@ -77,7 +82,7 @@ export function useSimulator(
       simulatorStore.markLoading(copy.value.runtime.loadingRuntime);
       const runtime = await loadRuntime({
         wasmModuleUrl: simulatorWasmModuleUrl,
-        assetResolver: (asset: any) => assetsStore.previewUrls[asset.id] ?? null
+        assetResolver: (asset: { id: string }) => assetsStore.previewUrls[asset.id] ?? null
       });
       if (mountGeneration !== simulatorMountGeneration || !simulatorVisible.value || simulatorCanvas.value !== canvas) {
         runtime.destroy();
@@ -173,11 +178,6 @@ export function useSimulator(
       return summary;
     }
     return error instanceof Error && localeStore.locale === "en-US" ? error.message : fallback;
-  }
-
-  function localizedErrorForCode(code: string, locale: string, fallback?: string): string {
-    // 简化版本，实际应该从 i18n/errors 导入
-    return fallback ?? code;
   }
 
   function projectDocForRuntime(doc: ProjectDoc, activeScreenId: string | null): ProjectDoc {
